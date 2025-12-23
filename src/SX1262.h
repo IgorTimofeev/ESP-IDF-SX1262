@@ -733,6 +733,78 @@ namespace YOBA {
 				
 				return updateModulationParams();
 			}
+			
+			bool transmit(const uint8_t* data, size_t len, uint8_t addr) {
+				// set mode to standby
+				if (!setStandby()) {
+					ESP_LOGE(_logTag, "failed to transmit: unable to enter standby mode");
+					return false;
+				}
+				
+				// check packet length
+				if (_codingRate > LORA_CR_4_8) {
+					// Long Interleaver needs at least 8 bytes
+					if (len < 8) {
+						ESP_LOGE(_logTag, "failed to transmit: packet is too short");
+						return false;
+					}
+					
+					// Long Interleaver supports up to 253 bytes if CRC is enabled
+					if (_crcType == LORA_CRC_ON && (len > MAX_PACKET_LENGTH - 2)) {
+						ESP_LOGE(_logTag, "failed to transmit: packet is too long");
+						return false;
+					}
+				}
+				
+				if (len > MAX_PACKET_LENGTH) {
+					ESP_LOGE(_logTag, "failed to transmit: packet is too long");
+					return false;
+				}
+				
+				// calculate timeout in ms (5ms + 500 % of expected time-on-air)
+				RadioLibTime_t timeout = 5 + (getTimeOnAir(len) * 5) / 1000;
+				RADIOLIB_DEBUG_BASIC_PRINTLN("Timeout in %lu ms", timeout);
+				
+				// start transmission
+				state = startTransmit(data, len, addr);
+				RADIOLIB_ASSERT(state);
+				
+				// wait for packet transmission or timeout
+				uint8_t modem = getPacketType();
+				RadioLibTime_t start = mod->hal->millis();
+				while(true) {
+					// yield for  multi-threaded platforms
+					mod->hal->yield();
+					
+					// check timeout
+					if(mod->hal->millis() - start > timeout) {
+						finishTransmit();
+						return(RADIOLIB_ERR_TX_TIMEOUT);
+					}
+					
+					// poll the interrupt pin
+					if(mod->hal->digitalRead(mod->getIrq())) {
+						// in LoRa or GFSK, only Tx done interrupt is enabled
+						if(modem != PACKET_TYPE_LR_FHSS) {
+							break;
+						}
+						
+						// in LR-FHSS, IRQ signals both Tx done as frequency hop request
+						if(getIrqFlags() & IRQ_TX_DONE) {
+							break;
+						} else {
+							// handle frequency hop
+							hopLRFHSS();
+						}
+					}
+				}
+				
+				// update data rate
+				RadioLibTime_t elapsed = mod->hal->millis() - start;
+				dataRateMeasured = (len*8.0f)/((float)elapsed/1000.0f);
+				
+				return(finishTransmit());
+			}
 		
 		private:
 			constexpr static const char* _logTag = "SX1262";
@@ -1140,6 +1212,7 @@ namespace YOBA {
 			
 			constexpr static uint32_t RF_CRYSTAL_FREQUENCY_MHZ = 32;
 			constexpr static uint32_t RF_DIVIDER = 1ULL << 25;
+			constexpr static uint8_t MAX_PACKET_LENGTH = 255;
 			
 			// -------------------------------- Commands --------------------------------
 			
