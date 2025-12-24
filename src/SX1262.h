@@ -15,41 +15,17 @@
 namespace YOBA {
 	class SX1262 {
 		public:
-			bool setup(
+			virtual bool setup(
 				spi_host_device_t SPIHostDevice,
+				uint32_t SPIFrequencyHz,
 				gpio_num_t SSPin,
+				
 				gpio_num_t busyPin,
-				gpio_num_t DIO1Pin,
-				gpio_num_t RSTPin,
-				
-				uint16_t frequencyMHz,
-				float bandwidthKHz,
-				uint8_t spreadingFactor,
-				uint8_t codingRate,
-				uint8_t syncWord,
-				int8_t power,
-				uint16_t preambleLength,
-				
-				bool useLDORegulator = false
+				gpio_num_t RSTPin
 			) {
 				_SSPin = SSPin;
 				_busyPin = busyPin;
-				_DIO1Pin = DIO1Pin;
 				_rstPin = RSTPin;
-				
-				// BW in kHz and SF are required in order to calculate LDRO for setModulationParams
-				// set the defaults, this will get overwritten later anyway
-				_bandwidthKHz = 500.0;
-				_spreadingFactor = 9;
-				
-				// initialize configuration variables (will be overwritten during public settings configuration)
-				_bandwidth = LORA_BW_500_0;  // initialized to 500 kHz, since lower values will interfere with LLCC68
-				_codingRate = LORA_CR_4_7;
-				_ldrOptimize = false;
-				_crcType = LORA_CRC_ON;
-				_preambleLength = preambleLength;
-				_tcxoDelay = 0;
-				_headerType = LORA_HEADER_EXPLICIT;
 				
 				// -------------------------------- GPIO output --------------------------------
 				
@@ -86,27 +62,12 @@ namespace YOBA {
 					gpio_config(&g);
 				}
 				
-				// DIO1
-				g = {};
-				g.pin_bit_mask = 1ULL << _DIO1Pin;
-				g.mode = GPIO_MODE_INPUT;
-				g.pull_up_en = GPIO_PULLUP_ENABLE;
-				g.pull_down_en = GPIO_PULLDOWN_DISABLE;
-				g.intr_type = GPIO_INTR_POSEDGE;
-				gpio_config(&g);
-				
-				gpio_install_isr_service(0);
-				gpio_isr_handler_add(_DIO1Pin, onDIO1PinInterrupt, this);
-				
-				_DIO1ISRSemaphore = xSemaphoreCreateBinary();
-				
 				// -------------------------------- SPI --------------------------------
 				
 				spi_device_interface_config_t SPIInterfaceConfig {};
 				// CPOL = 0, CPHA = 0
 				SPIInterfaceConfig.mode = 0;
-				// SX1262 supports up to 16 MHz, but with long wires (10+ cm) there will be troubles, so
-				SPIInterfaceConfig.clock_speed_hz = 8'000'000;
+				SPIInterfaceConfig.clock_speed_hz = SPIFrequencyHz;
 				SPIInterfaceConfig.spics_io_num = -1;
 				SPIInterfaceConfig.queue_size = 1;
 				
@@ -115,101 +76,17 @@ namespace YOBA {
 				if (!errorCheck(error))
 					return false;
 				
-				// -------------------------------- Interrupts --------------------------------
-				
-				
-				// -------------------------------- Initialization --------------------------------
-				
-				if (!reset())
-					return false;
-				
-				if (!validateChip())
-					return false;
-				
-				// TCXO configuration should be here
-				//				if (!XTAL && tcxoVoltage > 0.0f) {
-				//					setTCXO(tcxoVoltage);
-				//				}
-				
-				if (!setBufferBaseAddress(0x00, 0x00))
-					return false;
-				
-				if (!setPacketType(PACKET_TYPE_LORA))
-					return false;
-				
-				if (!setRxTxFallbackMode(RX_TX_FALLBACK_MODE_STDBY_RC))
-					return false;
-				
-				// Set some CAD parameters - will be overwritten when calling CAD anyway
-				if (!setCADParams())
-					return false;
-				
-				if (!clearIRQStatus())
-					return false;
-				
-				if (!setDioIRQParams())
-					return false;
-				
-				if (!calibrate(CALIBRATE_ALL))
-					return false;
-				
-				// Wait for calibration completion
-				delayMs(5);
-				
-				waitForBusy();
-				
-				if (!setRegulatorMode(useLDORegulator ? REGULATOR_LDO : REGULATOR_DC_DC))
-					return false;
-				
-				// -------------------------------- Publicly accessible settings --------------------------------
-				
-				if (!setCodingRate(codingRate))
-					return false;
-				
-				if (!setSyncWord(syncWord))
-					return false;
-				
-				if (!setPreambleLength(preambleLength))
-					return false;
-				
-				if (!setCurrentLimit(60.0))
-					return false;
-				
-				if (!setDio2AsRfSwitch(true))
-					return false;
-				
-				if (!setCRC(2))
-					return false;
-				
-				if (!invertIQ(false))
-					return false;
-				
-				if (!setSpreadingFactor(spreadingFactor))
-					return false;
-				
-				if (!setBandwidth(bandwidthKHz))
-					return false;
-				
-				if (!setFrequency(frequencyMHz))
-					return false;
-				
-				if (!fixPaClamping(true))
-					return false;
-				
-				if (!setOutputPower(power))
-					return false;
-				
 				return true;
 			}
 			
-			bool reset() {
+			virtual bool reset() {
 				if (_rstPin == GPIO_NUM_NC)
 					return true;
 				
 				// Toggling RST GPIO
-				setRstPinLevel(false);
+				setRSTPinLevel(false);
 				delayMs(10);
-				setRstPinLevel(true);
+				setRSTPinLevel(true);
 				delayMs(10);
 				
 				// Trying to set mode to standby - SX126x often refuses first few commands after reset
@@ -232,11 +109,10 @@ namespace YOBA {
 				return false;
 			}
 			
-			
-			bool validateChip() {
+			virtual bool validateChip() {
 				for (uint8_t i = 0; i < 10; ++i) {
 					uint8_t buffer[16] = {0};
-					readReg(REG_VERSION_STRING, buffer, 16);
+					SPIReadRegister(REG_VERSION_STRING, buffer, 16);
 					
 					if (strncmp(VERSION_STRING, reinterpret_cast<char*>(buffer), 6) == 0) {
 						ESP_LOGI(_logTag, "chip version: %s", buffer);
@@ -261,7 +137,7 @@ namespace YOBA {
 			  \param freqMax Frequency band upper bound.
 			  \returns \ref status_codes
 			*/
-			bool calibrateImageRejection(uint16_t freqMin, uint16_t freqMax) {
+			virtual bool calibrateImageRejection(uint16_t freqMin, uint16_t freqMax) {
 				// calculate the calibration coefficients and calibrate image
 				uint8_t data[3] = {
 					CMD_CALIBRATE_IMAGE,
@@ -272,9 +148,8 @@ namespace YOBA {
 				data[0] = (data[0] % 2) ? data[0] : data[0] - 1;
 				data[1] = (data[1] % 2) ? data[1] : data[1] + 1;
 				
-				return write(data, 3);
+				return SPIWrite(data, 3);
 			}
-			
 			
 			/*!
 			  \brief Perform image rejection calibration for the specified frequency.
@@ -283,7 +158,7 @@ namespace YOBA {
 			  \param frequencyMHz Frequency to perform the calibration for.
 			  \returns \ref status_codes
 			*/
-			bool calibrateImage(uint16_t frequencyMHz) {
+			virtual bool calibrateImage(uint16_t frequencyMHz) {
 				uint8_t data[3] = {
 					CMD_CALIBRATE_IMAGE,
 					0,
@@ -310,7 +185,7 @@ namespace YOBA {
 				
 				// matched with predefined ranges, do the calibration
 				if (data[1]) {
-					return write(data, 3);
+					return SPIWrite(data, 3);
 				}
 				
 				// if nothing matched, try custom calibration - they may or may not work
@@ -318,19 +193,10 @@ namespace YOBA {
 				return calibrateImageRejection(frequencyMHz - 4, frequencyMHz + 4);
 			}
 			
-			bool setFrequency(uint16_t frequencyMHz, bool skipCalibration = false) {
+			virtual bool setRFFrequency(uint16_t frequencyMHz) {
 				if (frequencyMHz < 120 || frequencyMHz > 960) {
 					ESP_LOGE(_logTag, "failed to set frequency: value %d is out of range [120; 960]");
 					return false;
-				}
-				
-				// check if we need to recalibrate image
-				if (!skipCalibration &&
-					(std::fabs(static_cast<int32_t>(frequencyMHz) - static_cast<int32_t>(_frequencyMHz)) >=
-					 CAL_IMG_FREQ_TRIG_MHZ)) {
-					if (!calibrateImage(frequencyMHz)) {
-						return false;
-					}
 				}
 				
 				// From SX1262 datasheet:
@@ -347,9 +213,7 @@ namespace YOBA {
 				// regValue = frequencyHz * divider / crystalFreqHz
 				// regValue = frequencyHz * 2^25 / 32'000'000 Hz
 				
-				const auto regValue = static_cast<uint32_t>(static_cast<uint64_t>(frequencyMHz) *
-															static_cast<uint64_t>(RF_DIVIDER) /
-															static_cast<uint64_t>(RF_CRYSTAL_FREQUENCY_MHZ));
+				const auto regValue = static_cast<uint32_t>(static_cast<uint64_t>(frequencyMHz) * static_cast<uint64_t>(RF_DIVIDER) / static_cast<uint64_t>(RF_CRYSTAL_FREQUENCY_MHZ));
 				
 				const uint8_t data[] = {
 					CMD_SET_RF_FREQUENCY,
@@ -359,18 +223,16 @@ namespace YOBA {
 					static_cast<uint8_t>(regValue & 0xFF)
 				};
 				
-				if (!write(data, 5)) {
+				if (!SPIWrite(data, 5)) {
 					ESP_LOGE(_logTag, "failed to set frequency to %d", frequencyMHz);
 					return false;
 				}
 				
-				_frequencyMHz = frequencyMHz;
-				
 				return true;
 			}
 			
-			bool setStandby(uint8_t value = STANDBY_RC) {
-				if (!writeCommandAndUint8(CMD_SET_STANDBY, value)) {
+			virtual bool setStandby(uint8_t value = STANDBY_RC) {
+				if (!SPIWriteCommandAndUint8(CMD_SET_STANDBY, value)) {
 					ESP_LOGE(_logTag, "failed to enter standby mode");
 					return false;
 				}
@@ -378,7 +240,7 @@ namespace YOBA {
 				return true;
 			}
 			
-			bool setRx(uint32_t timeoutUs = 0) {
+			virtual bool setRx(uint32_t timeoutUs = 0) {
 				if (!setRxOrTx(CMD_SET_RX, timeoutUs)) {
 					ESP_LOGE(_logTag, "failed to enter RX mode");
 					return false;
@@ -387,7 +249,7 @@ namespace YOBA {
 				return true;
 			}
 			
-			bool setTx(uint32_t timeoutUs = 0) {
+			virtual bool setTx(uint32_t timeoutUs = 0) {
 				if (!setRxOrTx(CMD_SET_TX, timeoutUs)) {
 					ESP_LOGE(_logTag, "failed to enter TX mode");
 					return false;
@@ -396,8 +258,8 @@ namespace YOBA {
 				return true;
 			}
 			
-			bool setRxTxFallbackMode(uint8_t value = RX_TX_FALLBACK_MODE_STDBY_RC) {
-				if (!writeCommandAndUint8(CMD_SET_RX_TX_FALLBACK_MODE, value)) {
+			virtual bool setRxTxFallbackMode(uint8_t value = RX_TX_FALLBACK_MODE_STDBY_RC) {
+				if (!SPIWriteCommandAndUint8(CMD_SET_RX_TX_FALLBACK_MODE, value)) {
 					ESP_LOGE(_logTag, "failed to configure RX/TX fallback mode");
 					return false;
 				}
@@ -405,11 +267,11 @@ namespace YOBA {
 				return true;
 			}
 			
-			bool setCADParams() {
+			virtual bool setCADParams(uint8_t spreadingFactor) {
 				const uint8_t data[] = {
 					CMD_SET_CAD_PARAMS,
 					CAD_ON_8_SYMB,
-					static_cast<uint8_t>(_spreadingFactor + 13),
+					static_cast<uint8_t>(spreadingFactor + 13),
 					CAD_PARAM_DET_MIN,
 					CAD_GOTO_STDBY,
 					0x00,
@@ -417,7 +279,7 @@ namespace YOBA {
 					0x00
 				};
 				
-				if (!write(data, 8)) {
+				if (!SPIWrite(data, 8)) {
 					ESP_LOGE(_logTag, "failed to set CAD params");
 					return false;
 				}
@@ -425,14 +287,14 @@ namespace YOBA {
 				return true;
 			}
 			
-			bool setBufferBaseAddress(uint8_t rxAddress = 0x00, uint8_t txAddress = 0x00) {
+			virtual bool setBufferBaseAddress(uint8_t rxAddress = 0x00, uint8_t txAddress = 0x00) {
 				const uint8_t data[] = {
 					CMD_SET_BUFFER_BASE_ADDRESS,
 					rxAddress,
 					txAddress
 				};
 				
-				if (!write(data, 3)) {
+				if (!SPIWrite(data, 3)) {
 					ESP_LOGE(_logTag, "failed to set buffer base address");
 					return false;
 				}
@@ -440,8 +302,8 @@ namespace YOBA {
 				return true;
 			}
 			
-			bool getStatus(uint8_t& status) {
-				if (!readCommand(CMD_GET_STATUS, &status, 1)) {
+			virtual bool getStatus(uint8_t& status) {
+				if (!SPIReadCommand(CMD_GET_STATUS, &status, 1)) {
 					ESP_LOGE(_logTag, "failed to get status");
 					
 					return false;
@@ -450,8 +312,8 @@ namespace YOBA {
 				return true;
 			}
 			
-			bool getPacketType(uint8_t& packetType) {
-				if (!readCommand(CMD_GET_PACKET_TYPE, &packetType, 1)) {
+			virtual bool getPacketType(uint8_t& packetType) {
+				if (!SPIReadCommand(CMD_GET_PACKET_TYPE, &packetType, 1)) {
 					ESP_LOGE(_logTag, "failed to get packet type");
 					
 					return false;
@@ -460,8 +322,8 @@ namespace YOBA {
 				return true;
 			}
 			
-			bool setPacketType(uint8_t packetType) {
-				if (!writeCommandAndUint8(CMD_SET_PACKET_TYPE, packetType)) {
+			virtual bool setPacketType(uint8_t packetType) {
+				if (!SPIWriteCommandAndUint8(CMD_SET_PACKET_TYPE, packetType)) {
 					ESP_LOGE(_logTag, "failed to set packet type");
 					return false;
 				}
@@ -469,7 +331,7 @@ namespace YOBA {
 				return true;
 			}
 			
-			bool setRegulatorMode(uint8_t mode) {
+			virtual bool setRegulatorMode(uint8_t mode) {
 				if (!setRxOrTx(CMD_SET_REGULATOR_MODE, mode)) {
 					ESP_LOGE(_logTag, "failed to set regulator mode");
 					return false;
@@ -478,10 +340,10 @@ namespace YOBA {
 				return true;
 			}
 			
-			bool getIRQStatus(uint16_t& status) {
+			virtual bool getIRQStatus(uint16_t& status) {
 				status = 0;
 				
-				if (!readCommand(CMD_GET_IRQ_STATUS, reinterpret_cast<uint8_t*>(&status), 2)) {
+				if (!SPIReadCommand(CMD_GET_IRQ_STATUS, reinterpret_cast<uint8_t*>(&status), 2)) {
 					ESP_LOGE(_logTag, "failed to get IRQ status");
 					
 					return false;
@@ -492,14 +354,14 @@ namespace YOBA {
 				return true;
 			}
 			
-			bool clearIRQStatus(uint16_t status = IRQ_ALL) {
+			virtual bool clearIRQStatus(uint16_t status = IRQ_ALL) {
 				const uint8_t data[] = {
 					CMD_CLEAR_IRQ_STATUS,
 					(uint8_t) ((status >> 8) & 0xFF),
 					(uint8_t) (status & 0xFF)
 				};
 				
-				if (!write(data, 3)) {
+				if (!SPIWrite(data, 3)) {
 					ESP_LOGE(_logTag, "failed to clear IRQ status");
 					return false;
 				}
@@ -507,7 +369,7 @@ namespace YOBA {
 				return true;
 			}
 			
-			bool setDioIRQParams(uint16_t irqMask = IRQ_NONE, uint16_t dio1Mask = IRQ_NONE, uint16_t dio2Mask = IRQ_NONE, uint16_t dio3Mask = IRQ_NONE) {
+			virtual bool setDioIRQParams(uint16_t irqMask = IRQ_NONE, uint16_t dio1Mask = IRQ_NONE, uint16_t dio2Mask = IRQ_NONE, uint16_t dio3Mask = IRQ_NONE) {
 				const uint8_t data[] = {
 					CMD_SET_DIO_IRQ_PARAMS,
 					
@@ -524,7 +386,7 @@ namespace YOBA {
 					static_cast<uint8_t>(dio3Mask & 0xFF)
 				};
 				
-				if (!write(data, 9)) {
+				if (!SPIWrite(data, 9)) {
 					ESP_LOGE(_logTag, "failed to set DIO IRQ params");
 					return false;
 				}
@@ -532,111 +394,8 @@ namespace YOBA {
 				return true;
 			}
 			
-			bool calibrate(uint8_t value) {
-				return writeCommandAndUint8(CMD_CALIBRATE, value);
-			}
-			
-			/*!
-			  \brief Sets LoRa coding rate denominator. Allowed values range from 4 to 8. Note that a value of 4 means no coding,
-			  is undocumented and not recommended without your own FEC.
-			  
-			  \param codingRate LoRa coding rate denominator to be set.
-			  \param longInterleave Enable long interleaver when set to true.
-			  Note that with long interleaver enabled, CR 4/7 is not possible, there are packet length restrictions,
-			  and it is not compatible with SX127x radios.
-			  
-			  \returns \ref status_codes
-			*/
-			bool setCodingRate(uint8_t codingRate, bool longInterleave = false) {
-				if (!checkForLoRaPacketType())
-					return false;
-				
-				if (codingRate < 4 || codingRate > 8) {
-					ESP_LOGE(_logTag, "failed to set coding rate: value %d is out of range [4; 8]", codingRate);
-					return false;
-				}
-				
-				if (longInterleave) {
-					switch (codingRate) {
-						case 4:
-							_codingRate = 0;
-							break;
-						case 5:
-						case 6:
-							_codingRate = codingRate;
-							break;
-						case 8:
-							_codingRate = codingRate - 1;
-							break;
-						default:
-							ESP_LOGE(_logTag, "failed to set coding rate: value %d is invalid", codingRate);
-							
-							return false;
-					}
-				} else {
-					_codingRate = codingRate - 4;
-				}
-				
-				updateLDROptimize(_ldrOptimize);
-				
-				return updateModulationParams();
-			}
-			
-			bool setBandwidth(float bandwidth) {
-				if (!checkForLoRaPacketType())
-					return false;
-				
-				// Ensure byte conversion doesn't overflow
-				if (bandwidth < 0 || bandwidth > 510) {
-					ESP_LOGE(_logTag, "failed to set bandwidth: value %f is out of range [0; 510]", bandwidth);
-					return false;
-				}
-				
-				// check allowed bandwidth values
-				auto bandWidthDiv2 = static_cast<uint8_t>((float) bandwidth / 2.f + 0.01f);
-				
-				switch (bandWidthDiv2) {
-					case 3: // 7.8:
-						_bandwidth = LORA_BW_7_8;
-						break;
-					case 5: // 10.4:
-						_bandwidth = LORA_BW_10_4;
-						break;
-					case 7: // 15.6:
-						_bandwidth = LORA_BW_15_6;
-						break;
-					case 10: // 20.8:
-						_bandwidth = LORA_BW_20_8;
-						break;
-					case 15: // 31.25:
-						_bandwidth = LORA_BW_31_25;
-						break;
-					case 20: // 41.7:
-						_bandwidth = LORA_BW_41_7;
-						break;
-					case 31: // 62.5:
-						_bandwidth = LORA_BW_62_5;
-						break;
-					case 62: // 125.0:
-						_bandwidth = LORA_BW_125_0;
-						break;
-					case 125: // 250.0
-						_bandwidth = LORA_BW_250_0;
-						break;
-					case 250: // 500.0
-						_bandwidth = LORA_BW_500_0;
-						break;
-					default: {
-						ESP_LOGE(_logTag, "failed to set bandwidth: value %f is invalid ", bandwidth);
-						return false;
-					}
-				}
-				
-				_bandwidthKHz = bandwidth;
-				
-				updateLDROptimize(_ldrOptimize);
-				
-				return updateModulationParams();
+			virtual bool calibrate(uint8_t value) {
+				return SPIWriteCommandAndUint8(CMD_CALIBRATE, value);
 			}
 			
 			/*!
@@ -647,7 +406,7 @@ namespace YOBA {
 			 
 			 \returns \ref status_codes
 		   */
-			bool setSyncWord(uint8_t syncWord, uint8_t controlBits = 0x44) {
+			virtual bool setSyncWord(uint8_t syncWord, uint8_t controlBits = 0x44) {
 				if (!checkForLoRaPacketType())
 					return false;
 				
@@ -656,7 +415,7 @@ namespace YOBA {
 					static_cast<uint8_t>(((syncWord & 0x0F) << 4) | (controlBits & 0x0F))
 				};
 				
-				if (!writeReg(REG_LORA_SYNC_WORD_MSB, data, 2)) {
+				if (!SPIWriteRegister(REG_LORA_SYNC_WORD_MSB, data, 2)) {
 					ESP_LOGE(_logTag, "failed to set sync word");
 					return false;
 				}
@@ -665,29 +424,11 @@ namespace YOBA {
 			}
 			
 			/*!
-			  \brief Sets preamble length for LoRa or FSK modem. Allowed values range from 1 to 65535.
-			  \param preambleLength Preamble length to be set in symbols (LoRa) or bits (FSK).
-			  NOTE: In FSK mode, sync word length limits the preamble detector length
-			  (the number of preamble bits that must be detected to start receiving packet).
-			  For details, see the note in SX1261 datasheet, Rev 2.1, section 6.2.2.1, page 45.
-			  Preamble detector length is adjusted automatically each time this method is called.
-			  \returns \ref status_codes
-			*/
-			bool setPreambleLength(uint16_t preambleLength) {
-				if (!checkForLoRaPacketType())
-					return false;
-				
-				_preambleLength = preambleLength;
-				
-				return updatePacketParams();
-			}
-			
-			/*!
 			 \brief Sets current protection limit. Can be set in 2.5 mA steps.
 			 \param currentLimit current protection limit to be set in mA. Allowed values range from 0 to 140.
 			 \returns \ref status_codes
 		   */
-			bool setCurrentLimit(float currentLimit) {
+			virtual bool setCurrentLimit(float currentLimit) {
 				// check allowed range
 				if (currentLimit < 0 || currentLimit > 140) {
 					ESP_LOGE(_logTag, "failed to set current limit: value %f is out of range [0; 140]", currentLimit);
@@ -697,230 +438,159 @@ namespace YOBA {
 				// calculate raw value
 				const auto rawLimit = static_cast<uint8_t>(currentLimit / 2.5f);
 				
-				return writeReg(REG_OCP_CONFIGURATION, &rawLimit, 1);
+				return SPIWriteRegister(REG_OCP_CONFIGURATION, &rawLimit, 1);
 			}
 			
 			/*!
 			  \brief Set DIO2 to function as RF switch (default in Semtech example designs).
 			  \returns \ref status_codes
 			*/
-			bool setDio2AsRfSwitch(bool enable) {
-				return writeCommandAndUint8(CMD_SET_DIO2_AS_RF_SWITCH_CTRL, enable ? DIO2_AS_RF_SWITCH : DIO2_AS_IRQ);
+			virtual bool setDio2AsRfSwitch(bool enable) {
+				return SPIWriteCommandAndUint8(CMD_SET_DIO2_AS_RF_SWITCH_CTRL, enable ? DIO2_AS_RF_SWITCH : DIO2_AS_IRQ);
 			}
 			
-			/*!
-			  \brief Sets CRC configuration.
-			  \param len CRC length in bytes, Allowed values are 1 or 2, set to 0 to disable CRC.
-			  \param initial Initial CRC value. FSK only. Defaults to 0x1D0F (CCIT CRC).
-			  \param polynomial Polynomial for CRC calculation. FSK only. Defaults to 0x1021 (CCIT CRC).
-			  \param inverted Invert CRC bytes. FSK only. Defaults to true (CCIT CRC).
-			  \returns \ref status_codes
-			*/
-			bool setCRC(uint8_t len, uint16_t initial = 0x1D0F, uint16_t polynomial = 0x1021, bool inverted = true) {
-				if (!checkForLoRaPacketType())
-					return false;
+			virtual bool setModulationParams(
+				uint8_t spreadingFactor,
+				uint8_t bandwidth,
+				uint8_t codingRate,
+				uint8_t ldrOptimize
+			) {
+				// 500/9/8  - 0x09 0x04 0x03 0x00 - SF9, BW125, 4/8
+				// 500/11/8 - 0x0B 0x04 0x03 0x00 - SF11 BW125, 4/7
+				const uint8_t data[5] = {
+					CMD_SET_MODULATION_PARAMS,
+					spreadingFactor,
+					bandwidth,
+					codingRate,
+					ldrOptimize
+				};
 				
-				// LoRa CRC doesn't allow to set CRC polynomial, initial value, or inversion
-				
-				if (len) {
-					_crcType = LORA_CRC_ON;
-				} else {
-					_crcType = LORA_CRC_OFF;
-				}
-				
-				return updatePacketParams();
+				return SPIWrite(data, 5);
 			}
 			
-			/*!
-			 \brief Enable/disable inversion of the I and Q signals
-			 \param enable IQ inversion enabled (true) or disabled (false);
-			 \returns \ref status_codes
-		   */
-			bool invertIQ(bool enable) {
-				if (!checkForLoRaPacketType())
+			virtual bool setTXClampConfig(bool enable) {
+				// fixes overly eager PA clamping
+				// see SX1262/SX1268 datasheet, chapter 15 Known Limitations, section 15.2 for details
+				
+				uint8_t clampConfig = 0;
+				
+				if (!SPIReadRegister(REG_TX_CLAMP_CONFIG, &clampConfig, 1))
 					return false;
 				
+				// apply or undo workaround
 				if (enable) {
-					_invertIQ = LORA_IQ_INVERTED;
-				} else {
-					_invertIQ = LORA_IQ_STANDARD;
+					clampConfig |= 0x1E;
+				}
+				else {
+					clampConfig = (clampConfig & ~0x1E) | 0x08;
 				}
 				
-				return updatePacketParams();
+				return SPIWriteRegister(REG_TX_CLAMP_CONFIG, &clampConfig, 1);
 			}
 			
-			/*!
-			 \brief Sets LoRa spreading factor. Allowed values range from 5 to 12.
-			 \param sf LoRa spreading factor to be set.
-			 \returns \ref status_codes
-		   */
-			bool setSpreadingFactor(uint8_t sf) {
-				if (!checkForLoRaPacketType())
-					return false;
+			virtual bool setOutputPower(int8_t power) {
+				// get current OCP configuration
+				uint8_t ocp = 0;
 				
-				if (sf < 5 || sf > 12) {
-					ESP_LOGE(_logTag, "failed to set spreading factor: value %d is out of range [5; 12]", sf);
+				if (!SPIReadRegister(REG_OCP_CONFIGURATION, &ocp, 1)) {
+					ESP_LOGE(_logTag, "set output power failed: unable to read OCP configuration");
 					return false;
 				}
 				
-				_spreadingFactor = sf;
+				// set PA config
+				if (!setPaConfig()) {
+					ESP_LOGE(_logTag, "set output power failed: unable to set PA config");
+					return false;
+				}
 				
-				return updateModulationParams();
+				// set output power with default 200us ramp
+				if (!setTxParams(power, PA_RAMP_200U)) {
+					ESP_LOGE(_logTag, "set output power failed: unable to set TX params");
+					return false;
+				}
+				
+				// restore OCP configuration
+				return SPIWriteRegister(REG_OCP_CONFIGURATION, &ocp, 1);
 			}
 			
-			bool fixTXModulationBeforeTransmission() {
-				// fix tx modulation for 500 kHz LoRa
-				// see SX1262/SX1268 datasheet, chapter 15 Known Limitations, section 15.1 for details
-				
-				uint8_t txModulation = 0;
-				
-				if (!readReg(REG_TX_MODULATION, &txModulation, 1))
+			virtual bool setPacketParams(
+				uint16_t preambleLength,
+				uint8_t headerType,
+				uint8_t length,
+				uint8_t crcType,
+				uint8_t invertIQ
+			) {
+				if (!fixInvertedIQ(invertIQ))
 					return false;
 				
+				const uint8_t data[7] = {
+					CMD_SET_PACKET_PARAMS,
+					(uint8_t) ((preambleLength >> 8) & 0xFF),
+					(uint8_t) (preambleLength & 0xFF),
+					headerType,
+					length,
+					crcType,
+					invertIQ
+				};
+				
+				return SPIWrite(data, 7);
+			}
+			
+			bool writeBuffer(const uint8_t* data, uint8_t length, uint8_t offset = 0x00) {
+				_SPIBuffer[0] = CMD_WRITE_BUFFER;
+				_SPIBuffer[1] = offset;
+				
+				std::memcpy(_SPIBuffer + 2, data, length);
+				
+				return writeSPIBuffer(2 + length);
+			}
+			
+		protected:
+			bool errorCheck(esp_err_t error) {
+				if (error != ESP_OK) {
+					ESP_ERROR_CHECK_WITHOUT_ABORT(error);
+					return false;
+				}
+				
+				return true;
+			}
+			
+			bool checkForLoRaPacketType() {
 				uint8_t packetType = 0;
 				
 				if (!getPacketType(packetType))
 					return false;
 				
-				// fix the value for LoRa with 500 kHz bandwidth
-				if (packetType == PACKET_TYPE_LORA && std::fabsf(_bandwidthKHz - 500.0f) <= 0.001f) {
-					txModulation &= 0xFB;
-				}
-				else {
-					txModulation |= 0x04;
-				}
-				
-				return writeReg(REG_TX_MODULATION, &txModulation, 1);
-			}
-			
-			bool finishTransmit() {
-				// clear interrupt flags
-				if (!clearIRQStatus())
-					return false;
-				
-				// set mode to standby to disable transmitter/RF switch
-				return setStandby();
-			}
-			
-			bool transmit(const uint8_t* data, uint8_t length, uint32_t timeoutMs = 0) {
-				// set mode to standby
-				if (!setStandby()) {
-					ESP_LOGE(_logTag, "failed to transmit: unable to enter standby mode");
+				if (packetType != PACKET_TYPE_LORA) {
+					ESP_LOGE(_logTag, "failed to set coding rate: packet type %d is not LoRa", packetType);
 					return false;
 				}
 				
-				// check packet length
-				if (_codingRate > LORA_CR_4_8) {
-					// Long Interleaver needs at least 8 bytes
-					if (length < 8) {
-						ESP_LOGE(_logTag, "failed to transmit: packet is too short");
-						return false;
-					}
+				return true;
+			}
+			
+			void delayMs(uint32_t ms) {
+				vTaskDelay(pdMS_TO_TICKS(std::max<uint32_t>(ms, portTICK_PERIOD_MS)));
+			}
+			
+			bool waitForBusy() {
+				auto deadline = esp_timer_get_time() + 1'000'000;
+				
+				while (getBusyPinLevel()) {
+					taskYIELD();
 					
-					// Long Interleaver supports up to 253 bytes if CRC is enabled
-					if (_crcType == LORA_CRC_ON && (length > MAX_PACKET_LENGTH - 2)) {
-						ESP_LOGE(_logTag, "failed to transmit: packet is too long");
+					if (esp_timer_get_time() >= deadline) {
+						ESP_LOGE(_logTag, "busy pin was kept in low state too long");
 						return false;
 					}
 				}
 				
-				if (!updatePacketParams(length))
-					return false;
-				
-				if (!setDioIRQParams(IRQ_TX_DONE | IRQ_TIMEOUT, IRQ_TX_DONE))
-					return false;
-				
-				if (!setBufferBaseAddress())
-					return false;
-				
-				if (!writeBuffer(data, length))
-					return false;
-				
-				if (!clearIRQStatus())
-					return false;
-				
-				// Important shit
-				if (!fixTXModulationBeforeTransmission())
-					return false;
-				
-				// LET'S FUCKING MOOOOVE
-				if (!setTx())
-					return false;
-					
-				// Wait for packet transmission or timeout
-				if (xSemaphoreTake(_DIO1ISRSemaphore, timeoutMs == 0 ? portMAX_DELAY : pdMS_TO_TICKS(timeoutMs)) != pdTRUE) {
-					ESP_LOGE(_logTag, "failed to transmit: timeout reached");
-					
-					return finishTransmit();
-				}
-				
-				return finishTransmit();
-			}
-		
-		private:
-			constexpr static const char* _logTag = "SX1262";
-			
-			spi_device_handle_t _SPIDevice{};
-			
-			gpio_num_t _SSPin = GPIO_NUM_NC;
-			gpio_num_t _busyPin = GPIO_NUM_NC;
-			gpio_num_t _DIO1Pin = GPIO_NUM_NC;
-			gpio_num_t _rstPin = GPIO_NUM_NC;
-			
-			uint16_t _frequencyMHz = 0;
-			uint8_t _spreadingFactor = 0;
-			uint8_t _codingRate = 0;
-			uint8_t _bandwidth = 0;
-			float _bandwidthKHz = 0;
-			int8_t _power = 0;
-			uint16_t _preambleLength = 0;
-			uint8_t _crcType = 0;
-			uint8_t _headerType = 0;
-			uint32_t _tcxoDelay = 0;
-			uint8_t _invertIQ = LORA_IQ_STANDARD;
-			
-			constexpr static uint16_t _dataBufferLength = 3 + 256;
-			uint8_t _SPIBuffer[_dataBufferLength] {};
-			
-			// LoRa low data rate optimization
-			bool _ldrOptimize = false;
-			bool _ldrOptimizeAuto = true;
-			
-			SemaphoreHandle_t _DIO1ISRSemaphore;
-			
-			void setSSPinLevel(bool value) {
-				gpio_set_level(_SSPin, value);
-			}
-			
-			void setRstPinLevel(bool value) {
-				gpio_set_level(_rstPin, value);
-			}
-			
-			bool getBusyPinLevel() {
-				return gpio_get_level(_busyPin);
-			}
-			
-			bool getDIO1PinLevel() {
-				return gpio_get_level(_DIO1Pin);
-			}
-			
-			IRAM_ATTR void onDIO1PinInterrupt() {
-				BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-				
-				xSemaphoreGiveFromISR(_DIO1ISRSemaphore, &xHigherPriorityTaskWoken);
-				
-				if (xHigherPriorityTaskWoken) {
-					portYIELD_FROM_ISR();
-				}
-			}
-			
-			IRAM_ATTR static void onDIO1PinInterrupt(void* arg) {
-				reinterpret_cast<SX1262*>(arg)->onDIO1PinInterrupt();
+				return true;
 			}
 			
 			// -------------------------------- Reading --------------------------------
 			
-			bool readCommand(uint8_t command, uint8_t* data, uint8_t length) {
+			bool SPIReadCommand(uint8_t command, uint8_t* data, uint8_t length) {
 				if (!waitForBusy())
 					return false;
 				
@@ -948,7 +618,7 @@ namespace YOBA {
 				return state;
 			}
 			
-			bool readReg(const uint16_t reg, uint8_t* data, const size_t length) {
+			bool SPIReadRegister(const uint16_t reg, uint8_t* data, const size_t length) {
 				if (!waitForBusy())
 					return false;
 				
@@ -972,13 +642,62 @@ namespace YOBA {
 				}
 				
 				for (int i = 0; i < 4 + length; ++i) {
-					ESP_LOGI(_logTag, "readReg buffer[%d]: %d", i, _SPIBuffer[i]);
+					ESP_LOGI(_logTag, "SPIReadRegister buffer[%d]: %d", i, _SPIBuffer[i]);
 				}
 				
 				return state;
 			}
 			
 			// -------------------------------- Writing --------------------------------
+			
+			bool SPIWrite(const uint8_t* data, uint16_t length) {
+				std::memcpy(_SPIBuffer, data, length);
+				
+				return writeSPIBuffer(length);
+			}
+			
+			bool SPIWriteCommandAndUint8(uint8_t command, uint8_t data) {
+				_SPIBuffer[0] = command;
+				_SPIBuffer[1] = data;
+				
+				return writeSPIBuffer(2);
+			}
+			
+			bool SPIWriteRegister(const uint16_t reg, const uint8_t* data, size_t length) {
+				_SPIBuffer[0] = CMD_WRITE_REGISTER;
+				_SPIBuffer[1] = (reg >> 8) & 0xFF; // Reg MSB
+				_SPIBuffer[2] = reg & 0xFF;        // Reg LSB
+				
+				std::memcpy(_SPIBuffer + 3, data, length);
+				
+				return writeSPIBuffer(3 + length);
+			}
+		
+		private:
+			constexpr static const char* _logTag = "SX1262";
+			
+			gpio_num_t _SSPin = GPIO_NUM_NC;
+			gpio_num_t _busyPin = GPIO_NUM_NC;
+			gpio_num_t _rstPin = GPIO_NUM_NC;
+			
+			spi_device_handle_t _SPIDevice {};
+			
+			constexpr static uint16_t _SPIBufferLength = 4 + 256;
+			uint8_t _SPIBuffer[_SPIBufferLength] {};
+			
+			void setSSPinLevel(bool value) {
+				gpio_set_level(_SSPin, value);
+			}
+			
+			void setRSTPinLevel(bool value) {
+				gpio_set_level(_rstPin, value);
+			}
+			
+			bool getBusyPinLevel() {
+				return gpio_get_level(_busyPin);
+			}
+
+			// -------------------------------- Auxiliary --------------------------------
 			
 			bool writeSPIBuffer(uint16_t totalLength) {
 				if (!waitForBusy())
@@ -995,72 +714,6 @@ namespace YOBA {
 				return state;
 			}
 			
-			bool write(const uint8_t* data, uint16_t length) {
-				std::memcpy(_SPIBuffer, data, length);
-				
-				return writeSPIBuffer(length);
-			}
-			
-			bool writeCommandAndUint8(uint8_t command, uint8_t data) {
-				_SPIBuffer[0] = command;
-				_SPIBuffer[1] = data;
-				
-				return writeSPIBuffer(2);
-			}
-			
-			bool writeReg(const uint16_t reg, const uint8_t* data, size_t length) {
-				_SPIBuffer[0] = CMD_WRITE_REGISTER;
-				_SPIBuffer[1] = (reg >> 8) & 0xFF; // Reg MSB
-				_SPIBuffer[2] = reg & 0xFF;        // Reg LSB
-				
-				std::memcpy(_SPIBuffer + 3, data, length);
-				
-				return writeSPIBuffer(3 + length);
-			}
-			
-			bool writeBuffer(const uint8_t* data, uint8_t length, uint8_t offset = 0x00) {
-				_SPIBuffer[0] = CMD_WRITE_BUFFER;
-				_SPIBuffer[1] = offset;
-				
-				std::memcpy(_SPIBuffer + 2, data, length);
-				
-				return writeSPIBuffer(2 + length);
-			}
-			
-			// -------------------------------- Auxiliary --------------------------------
-			
-			
-			bool errorCheck(esp_err_t error) {
-				if (error != ESP_OK) {
-					ESP_ERROR_CHECK_WITHOUT_ABORT(error);
-					return false;
-				}
-				
-				return true;
-			}
-			
-			void delayBusyWaitUs(uint32_t us) {
-				esp_rom_delay_us(us);
-			}
-			
-			void delayMs(uint32_t ms) {
-				vTaskDelay(pdMS_TO_TICKS(std::max<uint32_t>(ms, portTICK_PERIOD_MS)));
-			}
-			
-			bool waitForBusy() {
-				auto deadline = esp_timer_get_time() + 1'000'000;
-				
-				while (getBusyPinLevel()) {
-					taskYIELD();
-					
-					if (esp_timer_get_time() >= deadline) {
-						ESP_LOGE(_logTag, "busy pin was kept in low state too long");
-						return false;
-					}
-				}
-				
-				return true;
-			}
 			
 			inline static uint32_t getTimeoutValue(uint32_t timeoutUs) {
 				// From datasheet: timeoutUs = timeoutValue * 15.625 µs
@@ -1077,50 +730,7 @@ namespace YOBA {
 					static_cast<uint8_t>(timeout & 0xFF)
 				};
 				
-				return write(data, 4);
-			}
-			
-			bool checkForLoRaPacketType() {
-				uint8_t packetType = 0;
-				
-				if (!getPacketType(packetType))
-					return false;
-				
-				if (packetType != PACKET_TYPE_LORA) {
-					ESP_LOGE(_logTag, "failed to set coding rate: packet type %d is not LoRa", packetType);
-					return false;
-				}
-				
-				return true;
-			}
-			
-			void updateLDROptimize(bool value) {
-				// calculate symbol length and enable low data rate optimization, if autoconfiguration is enabled
-				if (_ldrOptimizeAuto) {
-					float symbolLength = (float) (uint32_t(1) << _spreadingFactor) / (float) _bandwidthKHz;
-					
-					if (symbolLength >= 16.0f) {
-						_ldrOptimize = LORA_LOW_DATA_RATE_OPTIMIZE_ON;
-					} else {
-						_ldrOptimize = LORA_LOW_DATA_RATE_OPTIMIZE_OFF;
-					}
-				} else {
-					_ldrOptimize = value;
-				}
-			}
-			
-			bool updateModulationParams() {
-				// 500/9/8  - 0x09 0x04 0x03 0x00 - SF9, BW125, 4/8
-				// 500/11/8 - 0x0B 0x04 0x03 0x00 - SF11 BW125, 4/7
-				const uint8_t data[5] = {
-					CMD_SET_MODULATION_PARAMS,
-					_spreadingFactor,
-					_bandwidth,
-					_codingRate,
-					_ldrOptimize
-				};
-				
-				return write(data, 5);
+				return SPIWrite(data, 4);
 			}
 			
 			bool fixInvertedIQ(uint8_t iqConfig) {
@@ -1130,7 +740,7 @@ namespace YOBA {
 				// read current IQ configuration
 				uint8_t iqConfigCurrent = 0;
 				
-				if (!readReg(REG_IQ_CONFIG, &iqConfigCurrent, 1))
+				if (!SPIReadRegister(REG_IQ_CONFIG, &iqConfigCurrent, 1))
 					return false;
 				
 				// set correct IQ configuration
@@ -1142,49 +752,11 @@ namespace YOBA {
 				}
 				
 				// update with the new value
-				return writeReg(REG_IQ_CONFIG, &iqConfigCurrent, 1);
-			}
-			
-			bool updatePacketParams(uint8_t length = MAX_PACKET_LENGTH) {
-				if (!fixInvertedIQ(_invertIQ))
-					return false;
-				
-				const uint8_t data[7] = {
-					CMD_SET_PACKET_PARAMS,
-					(uint8_t) ((_preambleLength >> 8) & 0xFF),
-					(uint8_t) (_preambleLength & 0xFF),
-					_headerType,
-					length,
-					_crcType,
-					_invertIQ
-				};
-				
-				return write(data, 7);
-			}
-			
-			bool fixPaClamping(bool enable = true) {
-				// fixes overly eager PA clamping
-				// see SX1262/SX1268 datasheet, chapter 15 Known Limitations, section 15.2 for details
-				
-				// read current clamping configuration
-				uint8_t clampConfig = 0;
-				
-				if (!readReg(REG_TX_CLAMP_CONFIG, &clampConfig, 1))
-					return false;
-				
-				// apply or undo workaround
-				if (enable) {
-					clampConfig |= 0x1E;
-				}
-				else {
-					clampConfig = (clampConfig & ~0x1E) | 0x08;
-				}
-			
-				return writeReg(REG_TX_CLAMP_CONFIG, &clampConfig, 1);
+				return SPIWriteRegister(REG_IQ_CONFIG, &iqConfigCurrent, 1);
 			}
 			
 			/*!
-			 \brief Set the PA configuration. Allows user to optimize PA for a specific output power
+			 \brief Set the PA (power amplifier) configuration. Allows user to optimize PA for a specific output power
 			 and matching network. Any calls to this method must be done after calling begin/beginFSK and/or setOutputPower.
 			 WARNING: Use at your own risk! Setting invalid values can and will lead to permanent damage!
 			 \param paDutyCycle PA duty cycle raw value.
@@ -1194,8 +766,7 @@ namespace YOBA {
 			 \param paLut paLut PA lookup table raw value.
 			 \returns \ref status_codes
 		   */
-			bool
-			setPaConfig(uint8_t paDutyCycle, uint8_t deviceSel, uint8_t hpMax = PA_CONFIG_HP_MAX, uint8_t paLut = PA_CONFIG_PA_LUT) {
+			bool setPaConfig(uint8_t paDutyCycle = 0x04, uint8_t deviceSel = PA_CONFIG_SX1262, uint8_t hpMax = PA_CONFIG_HP_MAX, uint8_t paLut = PA_CONFIG_PA_LUT) {
 				const uint8_t data[5] = {
 					CMD_SET_PA_CONFIG,
 					paDutyCycle,
@@ -1204,48 +775,22 @@ namespace YOBA {
 					paLut
 				};
 				
-				return write(data, 5);
+				return SPIWrite(data, 5);
 			}
 			
-			bool setTxParams(uint8_t pwr, uint8_t rampTime) {
-				const uint8_t data[] = {
-					CMD_SET_TX_PARAMS,
-					pwr,
-					rampTime
-				};
-				
-				if (!write(data, 3))
-					return false;
-				
-				_power = pwr;
-				
-				return true;
-			}
-			
-			bool setOutputPower(int8_t power) {
+			bool setTxParams(int8_t power, uint8_t rampTime) {
 				if (power < -9 || power > 22) {
 					ESP_LOGE(_logTag, "set output power failed: value %d is out of range [-9; 22]", power);
 					return false;
 				}
 				
-				// get current OCP configuration
-				uint8_t ocp = 0;
+				const uint8_t data[] = {
+					CMD_SET_TX_PARAMS,
+					static_cast<uint8_t>(power),
+					rampTime
+				};
 				
-				if (!readReg(REG_OCP_CONFIGURATION, &ocp, 1)) {
-					ESP_LOGE(_logTag, "set output power failed: unable to read OCP configuration");
-					return false;
-				}
-				
-				// set PA config
-				if (!setPaConfig(0x04, PA_CONFIG_SX1262))
-					return false;
-				
-				// set output power with default 200us ramp
-				if (!setTxParams(power, PA_RAMP_200U))
-					return false;
-				
-				// restore OCP configuration
-				return writeReg(REG_OCP_CONFIGURATION, &ocp, 1);
+				return SPIWrite(data, 3);
 			}
 			
 		public:
@@ -1375,7 +920,6 @@ namespace YOBA {
 			constexpr static uint8_t PA_CONFIG_HP_MAX = 0x07;
 			constexpr static uint8_t PA_CONFIG_PA_LUT = 0x01;
 			constexpr static uint8_t PA_CONFIG_SX1262 = 0x00;
-			constexpr static uint8_t PA_CONFIG_SX1262_8 = 0x00;
 			
 			// CMD_SET_RX_TX_FALLBACK_MODE
 			constexpr static uint8_t RX_TX_FALLBACK_MODE_FS = 0x40;        //  7     0   after Rx/Tx go to: FS mode
