@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstring>
 
+#include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
 #include <driver/gpio.h>
@@ -579,10 +580,10 @@ namespace YOBA {
 				if (state) {
 					std::memcpy(data, _SPIBuffer + 3, length);
 				}
-				
-				for (int i = 0; i < 3 + length; ++i) {
-					ESP_LOGI(_logTag, "readBuffer buffer[%d]: %d", i, _SPIBuffer[i]);
-				}
+//
+//				for (int i = 0; i < 3 + length; ++i) {
+//					ESP_LOGI(_logTag, "readBuffer buffer[%d]: %d", i, _SPIBuffer[i]);
+//				}
 				
 				return state;
 			}
@@ -651,9 +652,9 @@ namespace YOBA {
 					std::memcpy(data, _SPIBuffer + 2, length);
 				}
 				
-				for (int i = 0; i < 3; ++i) {
-					ESP_LOGI(_logTag, "SPIReadCommand buffer[%d]: %d", i, _SPIBuffer[i]);
-				}
+//				for (int i = 0; i < 3; ++i) {
+//					ESP_LOGI(_logTag, "SPIReadCommand buffer[%d]: %d", i, _SPIBuffer[i]);
+//				}
 				
 				return state;
 			}
@@ -679,9 +680,9 @@ namespace YOBA {
 					std::memcpy(data, _SPIBuffer + 4, length);
 				}
 				
-				for (int i = 0; i < 4 + length; ++i) {
-					ESP_LOGI(_logTag, "SPIReadRegister buffer[%d]: %d", i, _SPIBuffer[i]);
-				}
+//				for (int i = 0; i < 4 + length; ++i) {
+//					ESP_LOGI(_logTag, "SPIReadRegister buffer[%d]: %d", i, _SPIBuffer[i]);
+//				}
 				
 				return state;
 			}
