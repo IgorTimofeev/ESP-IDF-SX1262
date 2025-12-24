@@ -13,11 +13,13 @@
 #pragma once
 
 #include <cmath>
+#include <cstring>
 
 #include <freertos/semphr.h>
 
 #include <driver/gpio.h>
 #include <driver/spi_master.h>
+#include <esp_timer.h>
 #include <esp_log.h>
 
 namespace YOBA {

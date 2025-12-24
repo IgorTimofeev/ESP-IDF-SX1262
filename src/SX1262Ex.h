@@ -9,7 +9,6 @@
 namespace YOBA {
 	class SX1262Ex : public SX1262 {
 		public:
-			using SX1262::setup;
 			bool setup(
 				spi_host_device_t SPIHostDevice,
 				uint32_t SPIFrequencyHz,
@@ -409,6 +408,8 @@ namespace YOBA {
 			
 		private:
 			constexpr static const char* _logTag = "SX1262Ex";
+			
+			using SX1262::setup;
 			
 			gpio_num_t _DIO1Pin = GPIO_NUM_NC;
 			
