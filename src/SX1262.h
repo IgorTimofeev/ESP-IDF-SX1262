@@ -6,6 +6,8 @@
 
 #include <cmath>
 
+#include <freertos/semphr.h>
+
 #include <driver/gpio.h>
 #include <driver/spi_master.h>
 #include <esp_log.h>
@@ -85,18 +87,18 @@ namespace YOBA {
 				}
 				
 				// DIO1
-				if (_DIO1Pin != GPIO_NUM_NC) {
-					g = {};
-					g.pin_bit_mask = 1ULL << _DIO1Pin;
-					g.mode = GPIO_MODE_INPUT;
-					g.pull_up_en = GPIO_PULLUP_ENABLE;
-					g.pull_down_en = GPIO_PULLDOWN_DISABLE;
-					g.intr_type = GPIO_INTR_POSEDGE;
-					gpio_config(&g);
-					
-					gpio_install_isr_service(0);
-					gpio_isr_handler_add(_DIO1Pin, onDIO1PinInterrupt, this);
-				}
+				g = {};
+				g.pin_bit_mask = 1ULL << _DIO1Pin;
+				g.mode = GPIO_MODE_INPUT;
+				g.pull_up_en = GPIO_PULLUP_ENABLE;
+				g.pull_down_en = GPIO_PULLDOWN_DISABLE;
+				g.intr_type = GPIO_INTR_POSEDGE;
+				gpio_config(&g);
+				
+				gpio_install_isr_service(0);
+				gpio_isr_handler_add(_DIO1Pin, onDIO1PinInterrupt, this);
+				
+				_DIO1ISRSemaphore = xSemaphoreCreateBinary();
 				
 				// -------------------------------- SPI --------------------------------
 				
@@ -801,7 +803,7 @@ namespace YOBA {
 				return setStandby();
 			}
 			
-			bool transmit(const uint8_t* data, size_t length, uint32_t timeoutUs = 0) {
+			bool transmit(const uint8_t* data, size_t length, uint32_t timeoutMs = 0) {
 				// set mode to standby
 				if (!setStandby()) {
 					ESP_LOGE(_logTag, "failed to transmit: unable to enter standby mode");
@@ -831,8 +833,6 @@ namespace YOBA {
 				if (!updatePacketParams(length))
 					return false;
 				
-				_DIO1Interrupted = false;
-				
 				if (!setDioIRQParams(IRQ_TX_DONE | IRQ_TIMEOUT, IRQ_TX_DONE))
 					return false;
 				
@@ -852,26 +852,11 @@ namespace YOBA {
 				if (!setTx())
 					return false;
 					
-				// wait for packet transmission or timeout
-				const auto deadline = esp_timer_get_time() + (timeoutUs == 0 ? 1'000'000 : timeoutUs);
-				
-				while (true) {
-					taskYIELD();
+				// Wait for packet transmission or timeout
+				if (xSemaphoreTake(_DIO1ISRSemaphore, timeoutMs == 0 ? portMAX_DELAY : pdMS_TO_TICKS(timeoutMs)) != pdTRUE) {
+					ESP_LOGE(_logTag, "failed to transmit: timeout reached");
 					
-					if (esp_timer_get_time() < deadline) {
-						if (_DIO1Interrupted) {
-							ESP_LOGI(_logTag, "transmittedFlag true");
-							
-							break;
-						}
-					}
-					else {
-						finishTransmit();
-						
-						ESP_LOGE(_logTag, "failed to transmit: wait for interrupt timeout reached");
-						
-						return false;
-					}
+					return finishTransmit();
 				}
 				
 				return finishTransmit();
@@ -906,7 +891,7 @@ namespace YOBA {
 			bool _ldrOptimize = false;
 			bool _ldrOptimizeAuto = true;
 			
-			volatile bool _DIO1Interrupted = false;
+			SemaphoreHandle_t _DIO1ISRSemaphore;
 			
 			void setSSPinLevel(bool value) {
 				gpio_set_level(_SSPin, value);
@@ -925,10 +910,17 @@ namespace YOBA {
 			}
 			
 			void onDIO1PinInterrupt() {
-				_DIO1Interrupted = true;
+				BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+				
+				xSemaphoreGiveFromISR(_DIO1ISRSemaphore, &xHigherPriorityTaskWoken);
+				
+				if (xHigherPriorityTaskWoken) {
+					portYIELD_FROM_ISR();
+				}
 			}
 			
 			static void onDIO1PinInterrupt(void* arg) {
+				
 				reinterpret_cast<SX1262*>(arg)->onDIO1PinInterrupt();
 			}
 			
