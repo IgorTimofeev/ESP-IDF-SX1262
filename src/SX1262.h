@@ -768,14 +768,13 @@ namespace YOBA {
 				return updateModulationParams();
 			}
 			
-			bool fixSensitivity() {
-				// fix receiver sensitivity for 500 kHz LoRa
+			bool fixTXModulationBeforeTransmission() {
+				// fix tx modulation for 500 kHz LoRa
 				// see SX1262/SX1268 datasheet, chapter 15 Known Limitations, section 15.1 for details
 				
-				// read current sensitivity configuration
-				uint8_t sensitivityConfig = 0;
+				uint8_t txModulation = 0;
 				
-				if (!readReg(REG_SENSITIVITY_CONFIG, &sensitivityConfig, 1))
+				if (!readReg(REG_TX_MODULATION, &txModulation, 1))
 					return false;
 				
 				uint8_t packetType = 0;
@@ -785,13 +784,13 @@ namespace YOBA {
 				
 				// fix the value for LoRa with 500 kHz bandwidth
 				if (packetType == PACKET_TYPE_LORA && std::fabsf(_bandwidthKHz - 500.0f) <= 0.001f) {
-					sensitivityConfig &= 0xFB;
+					txModulation &= 0xFB;
 				}
 				else {
-					sensitivityConfig |= 0x04;
+					txModulation |= 0x04;
 				}
 				
-				return writeReg(REG_SENSITIVITY_CONFIG, &sensitivityConfig, 1);
+				return writeReg(REG_TX_MODULATION, &txModulation, 1);
 			}
 			
 			bool finishTransmit() {
@@ -803,7 +802,7 @@ namespace YOBA {
 				return setStandby();
 			}
 			
-			bool transmit(const uint8_t* data, size_t length, uint32_t timeoutMs = 0) {
+			bool transmit(const uint8_t* data, uint8_t length, uint32_t timeoutMs = 0) {
 				// set mode to standby
 				if (!setStandby()) {
 					ESP_LOGE(_logTag, "failed to transmit: unable to enter standby mode");
@@ -825,11 +824,6 @@ namespace YOBA {
 					}
 				}
 				
-				if (length > MAX_PACKET_LENGTH) {
-					ESP_LOGE(_logTag, "failed to transmit: packet is too long");
-					return false;
-				}
-				
 				if (!updatePacketParams(length))
 					return false;
 				
@@ -845,7 +839,8 @@ namespace YOBA {
 				if (!clearIRQStatus())
 					return false;
 				
-				if (!fixSensitivity())
+				// Important shit
+				if (!fixTXModulationBeforeTransmission())
 					return false;
 				
 				// LET'S FUCKING MOOOOVE
@@ -909,7 +904,7 @@ namespace YOBA {
 				return gpio_get_level(_DIO1Pin);
 			}
 			
-			void onDIO1PinInterrupt() {
+			IRAM_ATTR void onDIO1PinInterrupt() {
 				BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 				
 				xSemaphoreGiveFromISR(_DIO1ISRSemaphore, &xHigherPriorityTaskWoken);
@@ -919,8 +914,7 @@ namespace YOBA {
 				}
 			}
 			
-			static void onDIO1PinInterrupt(void* arg) {
-				
+			IRAM_ATTR static void onDIO1PinInterrupt(void* arg) {
 				reinterpret_cast<SX1262*>(arg)->onDIO1PinInterrupt();
 			}
 			
@@ -1614,7 +1608,7 @@ namespace YOBA {
 			constexpr static uint16_t REG_RANDOM_NUMBER_1 = 0x081A;
 			constexpr static uint16_t REG_RANDOM_NUMBER_2 = 0x081B;
 			constexpr static uint16_t REG_RANDOM_NUMBER_3 = 0x081C;
-			constexpr static uint16_t REG_SENSITIVITY_CONFIG = 0x0889; // SX1268 datasheet v1.1, section 15.1
+			constexpr static uint16_t REG_TX_MODULATION = 0x0889; // SX1268 datasheet v1.1, section 15.1
 			constexpr static uint16_t REG_RF_FREQUENCY_0 = 0x088B;
 			constexpr static uint16_t REG_RF_FREQUENCY_1 = 0x088C;
 			constexpr static uint16_t REG_RF_FREQUENCY_2 = 0x088D;
