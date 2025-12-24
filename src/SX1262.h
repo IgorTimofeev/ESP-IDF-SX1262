@@ -439,7 +439,7 @@ namespace YOBA {
 			}
 			
 			bool getStatus(uint8_t& status) {
-				if (!readCommandUint8(CMD_GET_STATUS, status)) {
+				if (!readCommand(CMD_GET_STATUS, &status, 1)) {
 					ESP_LOGE(_logTag, "failed to get status");
 					
 					return false;
@@ -449,7 +449,7 @@ namespace YOBA {
 			}
 			
 			bool getPacketType(uint8_t& packetType) {
-				if (!readCommandUint8(CMD_GET_PACKET_TYPE, packetType)) {
+				if (!readCommand(CMD_GET_PACKET_TYPE, &packetType, 1)) {
 					ESP_LOGE(_logTag, "failed to get packet type");
 					
 					return false;
@@ -472,6 +472,20 @@ namespace YOBA {
 					ESP_LOGE(_logTag, "failed to set regulator mode");
 					return false;
 				}
+				
+				return true;
+			}
+			
+			bool getIRQStatus(uint16_t& status) {
+				status = 0;
+				
+				if (!readCommand(CMD_GET_IRQ_STATUS, reinterpret_cast<uint8_t*>(&status), 2)) {
+					ESP_LOGE(_logTag, "failed to get IRQ status");
+					
+					return false;
+				}
+				
+				status = ((status & 0xFF) << 8) | ((status >> 8) & 0xFF);
 				
 				return true;
 			}
@@ -817,7 +831,7 @@ namespace YOBA {
 				if (!updatePacketParams(length))
 					return false;
 				
-				transmittedFlag = false;
+				_DIO1Interrupted = false;
 				
 				if (!setDioIRQParams(IRQ_TX_DONE | IRQ_TIMEOUT, IRQ_TX_DONE))
 					return false;
@@ -835,18 +849,18 @@ namespace YOBA {
 					return false;
 				
 				// LET'S FUCKING MOOOOVE
-				if (!setTx(timeoutUs))
+				if (!setTx())
 					return false;
 					
 				// wait for packet transmission or timeout
-				const auto deadline = esp_timer_get_time() + 10'000'000;
+				const auto deadline = esp_timer_get_time() + (timeoutUs == 0 ? 1'000'000 : timeoutUs);
 				
 				while (true) {
 					taskYIELD();
 					
 					if (esp_timer_get_time() < deadline) {
-						if (transmittedFlag) {
-							ESP_LOGI(_logTag, "transmittedFlag TRUE!!");
+						if (_DIO1Interrupted) {
+							ESP_LOGI(_logTag, "transmittedFlag true");
 							
 							break;
 						}
@@ -854,7 +868,7 @@ namespace YOBA {
 					else {
 						finishTransmit();
 						
-						ESP_LOGE(_logTag, "failed to transmit: timeout reached");
+						ESP_LOGE(_logTag, "failed to transmit: wait for interrupt timeout reached");
 						
 						return false;
 					}
@@ -892,7 +906,7 @@ namespace YOBA {
 			bool _ldrOptimize = false;
 			bool _ldrOptimizeAuto = true;
 			
-			volatile bool transmittedFlag = false;
+			volatile bool _DIO1Interrupted = false;
 			
 			void setSSPinLevel(bool value) {
 				gpio_set_level(_SSPin, value);
@@ -911,7 +925,7 @@ namespace YOBA {
 			}
 			
 			void onDIO1PinInterrupt() {
-				transmittedFlag = true;
+				_DIO1Interrupted = true;
 			}
 			
 			static void onDIO1PinInterrupt(void* arg) {
@@ -920,28 +934,29 @@ namespace YOBA {
 			
 			// -------------------------------- Reading --------------------------------
 			
-			bool readCommandUint8(uint8_t command, uint8_t& data) {
+			bool readCommand(uint8_t command, uint8_t* data, uint8_t length) {
 				if (!waitForBusy())
 					return false;
 				
-				_SPIBuffer[0] = command; // W: command | R: status 1 (can be ignored)
-				_SPIBuffer[1] = 0x00;    // W: -       | R: status 2 (can be ignored)
+				_SPIBuffer[0] = command; // W: command | R: status
+				_SPIBuffer[1] = 0x00;    // W: -       | R: status
 				_SPIBuffer[2] = 0x00;    // W: -       | R: result
 				
 				spi_transaction_t t {};
 				t.tx_buffer = _SPIBuffer;
 				t.rx_buffer = _SPIBuffer;
-				t.length = 8 * 3;
+				t.length = 8 * (2 + length);
 				
 				setSSPinLevel(false);
 				const auto state = errorCheck(spi_device_transmit(_SPIDevice, &t));
 				setSSPinLevel(true);
 				
-				if (state)
-					data = _SPIBuffer[2];
+				if (state) {
+					std::memcpy(data, _SPIBuffer + 2, length);
+				}
 				
 				for (int i = 0; i < 3; ++i) {
-					ESP_LOGI("PIZDA", "readCommandUint8 buffer[%d]: %d", i, _SPIBuffer[i]);
+					ESP_LOGI(_logTag, "readCommandUint8 buffer[%d]: %d", i, _SPIBuffer[i]);
 				}
 				
 				return state;
@@ -954,7 +969,8 @@ namespace YOBA {
 				_SPIBuffer[0] = CMD_READ_REGISTER; // W: command  | R: status
 				_SPIBuffer[1] = (reg >> 8) & 0xFF; // W: Reg MSB  | R: status
 				_SPIBuffer[2] = reg & 0xFF;        // W: Reg LSB  | R: status
-				_SPIBuffer[3] = 0x00;              // W: -        | R: status
+				_SPIBuffer[3] = 0x00;              //             | R: status
+				//         4                                      | R: data start...
 				
 				spi_transaction_t t {};
 				t.tx_buffer = _SPIBuffer;
@@ -970,7 +986,7 @@ namespace YOBA {
 				}
 				
 				for (int i = 0; i < 4 + length; ++i) {
-					ESP_LOGI("PIZDA", "readReg buffer[%d]: %d", i, _SPIBuffer[i]);
+					ESP_LOGI(_logTag, "readReg buffer[%d]: %d", i, _SPIBuffer[i]);
 				}
 				
 				return state;
