@@ -15,10 +15,10 @@ namespace YOBA {
 		public:
 			bool setup(
 				spi_host_device_t SPIHostDevice,
-				gpio_num_t ssPin,
+				gpio_num_t SSPin,
 				gpio_num_t busyPin,
-				gpio_num_t dio1Pin,
-				gpio_num_t rstPin,
+				gpio_num_t DIO1Pin,
+				gpio_num_t RSTPin,
 				
 				uint16_t frequencyMHz,
 				float bandwidthKHz,
@@ -30,10 +30,10 @@ namespace YOBA {
 				
 				bool useLDORegulator = false
 			) {
-				_ssPin = ssPin;
+				_SSPin = SSPin;
 				_busyPin = busyPin;
-				_dio1Pin = dio1Pin;
-				_rstPin = rstPin;
+				_DIO1Pin = DIO1Pin;
+				_rstPin = RSTPin;
 				
 				// BW in kHz and SF are required in order to calculate LDRO for setModulationParams
 				// set the defaults, this will get overwritten later anyway
@@ -48,31 +48,63 @@ namespace YOBA {
 				_preambleLength = preambleLength;
 				_tcxoDelay = 0;
 				_headerType = LORA_HEADER_EXPLICIT;
-				_implicitLen = 0xFF;
 				
-				// -------------------------------- GPIO --------------------------------
+				// -------------------------------- GPIO output --------------------------------
 				
-				gpio_config_t GPIOConfig{};
-				GPIOConfig.pin_bit_mask = (1ULL << _ssPin);
+				// Output
+				gpio_config_t g {};
 				
-				// RST may be set to NotConnected
-				if (_rstPin != GPIO_NUM_NC)
-					GPIOConfig.pin_bit_mask |= 1ULL << _rstPin;
+				// SS
+				g.pin_bit_mask = (1ULL << _SSPin);
 				
-				GPIOConfig.mode = GPIO_MODE_OUTPUT;
-				GPIOConfig.pull_up_en = GPIO_PULLUP_DISABLE;
-				GPIOConfig.pull_down_en = GPIO_PULLDOWN_DISABLE;
-				GPIOConfig.intr_type = GPIO_INTR_DISABLE;
-				gpio_config(&GPIOConfig);
+				// RST
+				if (_rstPin != GPIO_NUM_NC) {
+					g.pin_bit_mask |= (1ULL << _rstPin);
+				}
+				
+				g.mode = GPIO_MODE_OUTPUT;
+				g.pull_up_en = GPIO_PULLUP_DISABLE;
+				g.pull_down_en = GPIO_PULLDOWN_DISABLE;
+				g.intr_type = GPIO_INTR_DISABLE;
+				gpio_config(&g);
 				
 				// Setting SS to high just in case
 				setSSPinLevel(true);
 				
+				// -------------------------------- GPIO input --------------------------------
+				
+				// Busy
+				if (_busyPin != GPIO_NUM_NC) {
+					g = {};
+					g.pin_bit_mask = 1ULL << _busyPin;
+					g.mode = GPIO_MODE_INPUT;
+					g.pull_up_en = GPIO_PULLUP_ENABLE;
+					g.pull_down_en = GPIO_PULLDOWN_DISABLE;
+					g.intr_type = GPIO_INTR_DISABLE;
+					gpio_config(&g);
+				}
+				
+				// DIO1
+				if (_DIO1Pin != GPIO_NUM_NC) {
+					g = {};
+					g.pin_bit_mask = 1ULL << _DIO1Pin;
+					g.mode = GPIO_MODE_INPUT;
+					g.pull_up_en = GPIO_PULLUP_ENABLE;
+					g.pull_down_en = GPIO_PULLDOWN_DISABLE;
+					g.intr_type = GPIO_INTR_POSEDGE;
+					gpio_config(&g);
+					
+					gpio_install_isr_service(0);
+					gpio_isr_handler_add(_DIO1Pin, onDIO1PinInterrupt, this);
+				}
+				
 				// -------------------------------- SPI --------------------------------
 				
-				spi_device_interface_config_t SPIInterfaceConfig{};
-				SPIInterfaceConfig.mode = 0;                         // CPOL = 0, CPHA = 0
-				SPIInterfaceConfig.clock_speed_hz = 8'000'000;      // Max allowed freq = 16 MHz
+				spi_device_interface_config_t SPIInterfaceConfig {};
+				// CPOL = 0, CPHA = 0
+				SPIInterfaceConfig.mode = 0;
+				// SX1262 supports up to 16 MHz, but with long wires (10+ cm) there will be troubles, so
+				SPIInterfaceConfig.clock_speed_hz = 8'000'000;
 				SPIInterfaceConfig.spics_io_num = -1;
 				SPIInterfaceConfig.queue_size = 1;
 				
@@ -201,18 +233,15 @@ namespace YOBA {
 			
 			bool validateChip() {
 				for (uint8_t i = 0; i < 10; ++i) {
-					constexpr static uint8_t bufferLength = 4 + 16;
-					uint8_t buffer[bufferLength] = {0};
-					readReg(REG_VERSION_STRING, buffer, bufferLength);
+					uint8_t buffer[16] = {0};
+					readReg(REG_VERSION_STRING, buffer, 16);
 					
-					auto data = buffer + 4;
-					
-					if (strncmp(VERSION_STRING, reinterpret_cast<char*>(data), 6) == 0) {
-						ESP_LOGI(_logTag, "chip version: %s", data);
+					if (strncmp(VERSION_STRING, reinterpret_cast<char*>(buffer), 6) == 0) {
+						ESP_LOGI(_logTag, "chip version: %s", buffer);
 						
 						return true;
 					} else {
-						ESP_LOGE(_logTag, "failed to validate chip: version mismatch, attempt is %d, value is %s", i, data);
+						ESP_LOGE(_logTag, "failed to validate chip: version mismatch, attempt is %d, value is %s", i, buffer);
 						
 						delayMs(10);
 					}
@@ -462,8 +491,7 @@ namespace YOBA {
 				return true;
 			}
 			
-			bool
-			setDioIRQParams(uint16_t irqMask = IRQ_NONE, uint16_t dio1Mask = IRQ_NONE, uint16_t dio2Mask = IRQ_NONE, uint16_t dio3Mask = IRQ_NONE) {
+			bool setDioIRQParams(uint16_t irqMask = IRQ_NONE, uint16_t dio1Mask = IRQ_NONE, uint16_t dio2Mask = IRQ_NONE, uint16_t dio3Mask = IRQ_NONE) {
 				const uint8_t data[] = {
 					CMD_SET_DIO_IRQ_PARAMS,
 					
@@ -607,15 +635,12 @@ namespace YOBA {
 				if (!checkForLoRaPacketType())
 					return false;
 				
-				uint8_t data[5]{
-					0,
-					0,
-					0,
+				uint8_t data[] {
 					static_cast<uint8_t>((syncWord & 0xF0) | ((controlBits & 0xF0) >> 4)),
 					static_cast<uint8_t>(((syncWord & 0x0F) << 4) | (controlBits & 0x0F))
 				};
 				
-				if (!writeReg(REG_LORA_SYNC_WORD_MSB, data, 5)) {
+				if (!writeReg(REG_LORA_SYNC_WORD_MSB, data, 2)) {
 					ESP_LOGE(_logTag, "failed to set sync word");
 					return false;
 				}
@@ -654,16 +679,9 @@ namespace YOBA {
 				}
 				
 				// calculate raw value
-				auto rawLimit = static_cast<uint8_t>(currentLimit / 2.5f);
+				const auto rawLimit = static_cast<uint8_t>(currentLimit / 2.5f);
 				
-				uint8_t data[4]{
-					0,
-					0,
-					0,
-					rawLimit
-				};
-				
-				return writeReg(REG_OCP_CONFIGURATION, data, 4);
+				return writeReg(REG_OCP_CONFIGURATION, &rawLimit, 1);
 			}
 			
 			/*!
@@ -734,7 +752,42 @@ namespace YOBA {
 				return updateModulationParams();
 			}
 			
-			bool transmit(const uint8_t* data, size_t len, uint8_t addr) {
+			bool fixSensitivity() {
+				// fix receiver sensitivity for 500 kHz LoRa
+				// see SX1262/SX1268 datasheet, chapter 15 Known Limitations, section 15.1 for details
+				
+				// read current sensitivity configuration
+				uint8_t sensitivityConfig = 0;
+				
+				if (!readReg(REG_SENSITIVITY_CONFIG, &sensitivityConfig, 1))
+					return false;
+				
+				uint8_t packetType = 0;
+				
+				if (!getPacketType(packetType))
+					return false;
+				
+				// fix the value for LoRa with 500 kHz bandwidth
+				if (packetType == PACKET_TYPE_LORA && std::fabsf(_bandwidthKHz - 500.0f) <= 0.001f) {
+					sensitivityConfig &= 0xFB;
+				}
+				else {
+					sensitivityConfig |= 0x04;
+				}
+				
+				return writeReg(REG_SENSITIVITY_CONFIG, &sensitivityConfig, 1);
+			}
+			
+			bool finishTransmit() {
+				// clear interrupt flags
+				if (!clearIRQStatus())
+					return false;
+				
+				// set mode to standby to disable transmitter/RF switch
+				return setStandby();
+			}
+			
+			bool transmit(const uint8_t* data, size_t length, uint32_t timeoutUs = 0) {
 				// set mode to standby
 				if (!setStandby()) {
 					ESP_LOGE(_logTag, "failed to transmit: unable to enter standby mode");
@@ -744,66 +797,70 @@ namespace YOBA {
 				// check packet length
 				if (_codingRate > LORA_CR_4_8) {
 					// Long Interleaver needs at least 8 bytes
-					if (len < 8) {
+					if (length < 8) {
 						ESP_LOGE(_logTag, "failed to transmit: packet is too short");
 						return false;
 					}
 					
 					// Long Interleaver supports up to 253 bytes if CRC is enabled
-					if (_crcType == LORA_CRC_ON && (len > MAX_PACKET_LENGTH - 2)) {
+					if (_crcType == LORA_CRC_ON && (length > MAX_PACKET_LENGTH - 2)) {
 						ESP_LOGE(_logTag, "failed to transmit: packet is too long");
 						return false;
 					}
 				}
 				
-				if (len > MAX_PACKET_LENGTH) {
+				if (length > MAX_PACKET_LENGTH) {
 					ESP_LOGE(_logTag, "failed to transmit: packet is too long");
 					return false;
 				}
 				
-				// calculate timeout in ms (5ms + 500 % of expected time-on-air)
-				RadioLibTime_t timeout = 5 + (getTimeOnAir(len) * 5) / 1000;
-				RADIOLIB_DEBUG_BASIC_PRINTLN("Timeout in %lu ms", timeout);
+				if (!updatePacketParams(length))
+					return false;
 				
-				// start transmission
-				state = startTransmit(data, len, addr);
-				RADIOLIB_ASSERT(state);
+				transmittedFlag = false;
 				
+				if (!setDioIRQParams(IRQ_TX_DONE | IRQ_TIMEOUT, IRQ_TX_DONE))
+					return false;
+				
+				if (!setBufferBaseAddress())
+					return false;
+				
+				if (!writeBuffer(data, length))
+					return false;
+				
+				if (!clearIRQStatus())
+					return false;
+				
+				if (!fixSensitivity())
+					return false;
+				
+				// LET'S FUCKING MOOOOVE
+				if (!setTx(timeoutUs))
+					return false;
+					
 				// wait for packet transmission or timeout
-				uint8_t modem = getPacketType();
-				RadioLibTime_t start = mod->hal->millis();
-				while(true) {
-					// yield for  multi-threaded platforms
-					mod->hal->yield();
+				const auto deadline = esp_timer_get_time() + 10'000'000;
+				
+				while (true) {
+					taskYIELD();
 					
-					// check timeout
-					if(mod->hal->millis() - start > timeout) {
-						finishTransmit();
-						return(RADIOLIB_ERR_TX_TIMEOUT);
+					if (esp_timer_get_time() < deadline) {
+						if (transmittedFlag) {
+							ESP_LOGI(_logTag, "transmittedFlag TRUE!!");
+							
+							break;
+						}
 					}
-					
-					// poll the interrupt pin
-					if(mod->hal->digitalRead(mod->getIrq())) {
-						// in LoRa or GFSK, only Tx done interrupt is enabled
-						if(modem != PACKET_TYPE_LR_FHSS) {
-							break;
-						}
+					else {
+						finishTransmit();
 						
-						// in LR-FHSS, IRQ signals both Tx done as frequency hop request
-						if(getIrqFlags() & IRQ_TX_DONE) {
-							break;
-						} else {
-							// handle frequency hop
-							hopLRFHSS();
-						}
+						ESP_LOGE(_logTag, "failed to transmit: timeout reached");
+						
+						return false;
 					}
 				}
 				
-				// update data rate
-				RadioLibTime_t elapsed = mod->hal->millis() - start;
-				dataRateMeasured = (len*8.0f)/((float)elapsed/1000.0f);
-				
-				return(finishTransmit());
+				return finishTransmit();
 			}
 		
 		private:
@@ -811,9 +868,9 @@ namespace YOBA {
 			
 			spi_device_handle_t _SPIDevice{};
 			
-			gpio_num_t _ssPin = GPIO_NUM_NC;
+			gpio_num_t _SSPin = GPIO_NUM_NC;
 			gpio_num_t _busyPin = GPIO_NUM_NC;
-			gpio_num_t _dio1Pin = GPIO_NUM_NC;
+			gpio_num_t _DIO1Pin = GPIO_NUM_NC;
 			gpio_num_t _rstPin = GPIO_NUM_NC;
 			
 			uint16_t _frequencyMHz = 0;
@@ -826,15 +883,19 @@ namespace YOBA {
 			uint8_t _crcType = 0;
 			uint8_t _headerType = 0;
 			uint32_t _tcxoDelay = 0;
-			uint8_t _implicitLen = 0xFF;
 			uint8_t _invertIQ = LORA_IQ_STANDARD;
+			
+			constexpr static uint16_t _dataBufferLength = 3 + 256;
+			uint8_t _SPIBuffer[_dataBufferLength] {};
 			
 			// LoRa low data rate optimization
 			bool _ldrOptimize = false;
 			bool _ldrOptimizeAuto = true;
 			
+			volatile bool transmittedFlag = false;
+			
 			void setSSPinLevel(bool value) {
-				gpio_set_level(_ssPin, value);
+				gpio_set_level(_SSPin, value);
 			}
 			
 			void setRstPinLevel(bool value) {
@@ -845,125 +906,123 @@ namespace YOBA {
 				return gpio_get_level(_busyPin);
 			}
 			
+			bool getDIO1PinLevel() {
+				return gpio_get_level(_DIO1Pin);
+			}
+			
+			void onDIO1PinInterrupt() {
+				transmittedFlag = true;
+			}
+			
+			static void onDIO1PinInterrupt(void* arg) {
+				reinterpret_cast<SX1262*>(arg)->onDIO1PinInterrupt();
+			}
+			
 			// -------------------------------- Reading --------------------------------
 			
 			bool readCommandUint8(uint8_t command, uint8_t& data) {
 				if (!waitForBusy())
 					return false;
 				
-				spi_transaction_t t{};
-				t.tx_data[0] = command;
-				t.tx_data[1] = 0x00;
-				t.tx_data[2] = 0x00;
+				_SPIBuffer[0] = command; // W: command | R: status 1 (can be ignored)
+				_SPIBuffer[1] = 0x00;    // W: -       | R: status 2 (can be ignored)
+				_SPIBuffer[2] = 0x00;    // W: -       | R: result
 				
-				t.rx_data[0] = 0x00; // Status 1 (can be ignored)
-				t.rx_data[1] = 0x00; // Status 2 (can be ignored)
-				t.rx_data[2] = 0x00; // Result
-				
+				spi_transaction_t t {};
+				t.tx_buffer = _SPIBuffer;
+				t.rx_buffer = _SPIBuffer;
 				t.length = 8 * 3;
-				t.flags = SPI_TRANS_USE_TXDATA | SPI_TRANS_USE_RXDATA;
 				
 				setSSPinLevel(false);
 				const auto state = errorCheck(spi_device_transmit(_SPIDevice, &t));
 				setSSPinLevel(true);
 				
 				if (state)
-					data = t.rx_data[2];
+					data = _SPIBuffer[2];
 				
 				for (int i = 0; i < 3; ++i) {
-					ESP_LOGI("PIZDA", "readCommandUint8 buffer[%d]: %d", i, t.rx_data[i]);
+					ESP_LOGI("PIZDA", "readCommandUint8 buffer[%d]: %d", i, _SPIBuffer[i]);
 				}
 				
 				return state;
 			}
 			
-			// Buffer length should be "4 + readDataLength". To access data after reading, use "buffer + 4"
-			//
-			// Explanation:
-			// During writing, first 3 bytes of buffer will be overwritten with uint8 command and uint16 register address
-			// During reading, first 4 bytes will contain module status, and the rest will contain requested data
-			bool readReg(const uint16_t reg, uint8_t* buffer, const size_t length) {
+			bool readReg(const uint16_t reg, uint8_t* data, const size_t length) {
 				if (!waitForBusy())
 					return false;
 				
-				buffer[0] = CMD_READ_REGISTER;
-				buffer[1] = (reg >> 8) & 0xFF; // Reg MSB
-				buffer[2] = reg & 0xFF;        // Reg LSB
+				_SPIBuffer[0] = CMD_READ_REGISTER; // W: command  | R: status
+				_SPIBuffer[1] = (reg >> 8) & 0xFF; // W: Reg MSB  | R: status
+				_SPIBuffer[2] = reg & 0xFF;        // W: Reg LSB  | R: status
+				_SPIBuffer[3] = 0x00;              // W: -        | R: status
 				
-				spi_transaction_t t{};
-				
-				t.tx_buffer = buffer;
-				t.rx_buffer = buffer;
-				
-				t.length = 8 * length;
+				spi_transaction_t t {};
+				t.tx_buffer = _SPIBuffer;
+				t.rx_buffer = _SPIBuffer;
+				t.length = 8 * (4 + length);
 				
 				setSSPinLevel(false);
 				const auto state = errorCheck(spi_device_transmit(_SPIDevice, &t));
 				setSSPinLevel(true);
 				
-				for (int i = 0; i < length; ++i) {
-					ESP_LOGI("PIZDA", "readReg buffer[%d]: %d", i, buffer[i]);
+				if (state) {
+					std::memcpy(data, _SPIBuffer + 4, length);
+				}
+				
+				for (int i = 0; i < 4 + length; ++i) {
+					ESP_LOGI("PIZDA", "readReg buffer[%d]: %d", i, _SPIBuffer[i]);
 				}
 				
 				return state;
 			}
 			
-			bool readRegUint8(const uint16_t reg, uint8_t& data) {
-				uint8_t buffer[5]{
-					0x00,
-					0x00,
-					0x00,
-					0x00,
-					0x00
-				};
-				
-				if (!readReg(reg, buffer, 5))
-					return false;
-				
-				data = buffer[4];
-				
-				return true;
-			}
-			
 			// -------------------------------- Writing --------------------------------
 			
-			bool write(spi_transaction_t* transaction) {
+			bool writeSPIBuffer(uint16_t totalLength) {
 				if (!waitForBusy())
 					return false;
 				
+				spi_transaction_t t {};
+				t.tx_buffer = _SPIBuffer;
+				t.length = 8 * totalLength;
+				
 				setSSPinLevel(false);
-				const auto state = errorCheck(spi_device_transmit(_SPIDevice, transaction));
+				const auto state = errorCheck(spi_device_transmit(_SPIDevice, &t));
 				setSSPinLevel(true);
 				
 				return state;
 			}
 			
-			bool write(const uint8_t* buffer, size_t length) {
-				spi_transaction_t transaction{};
-				transaction.tx_buffer = buffer;
-				transaction.length = 8 * length;
+			bool write(const uint8_t* data, uint16_t length) {
+				std::memcpy(_SPIBuffer, data, length);
 				
-				return write(&transaction);
+				return writeSPIBuffer(length);
 			}
 			
 			bool writeCommandAndUint8(uint8_t command, uint8_t data) {
-				spi_transaction_t transaction{};
-				transaction.tx_data[0] = command;
-				transaction.tx_data[1] = data;
-				transaction.length = 8 * 2;
-				transaction.flags = SPI_TRANS_USE_TXDATA;
+				_SPIBuffer[0] = command;
+				_SPIBuffer[1] = data;
 				
-				return write(&transaction);
+				return writeSPIBuffer(2);
 			}
 			
-			// Buffer data should be shifted by 3 first bytes
-			// 0x00, 0x00, 0x00, Data0, Data2, ...
-			bool writeReg(const uint16_t reg, uint8_t* buffer, size_t length) {
-				buffer[0] = CMD_WRITE_REGISTER;
-				buffer[1] = (reg >> 8) & 0xFF; // Reg MSB
-				buffer[2] = reg & 0xFF;        // Reg LSB
+			bool writeReg(const uint16_t reg, const uint8_t* data, size_t length) {
+				_SPIBuffer[0] = CMD_WRITE_REGISTER;
+				_SPIBuffer[1] = (reg >> 8) & 0xFF; // Reg MSB
+				_SPIBuffer[2] = reg & 0xFF;        // Reg LSB
 				
-				return write(buffer, length);
+				std::memcpy(_SPIBuffer + 3, data, length);
+				
+				return writeSPIBuffer(3 + length);
+			}
+			
+			bool writeBuffer(const uint8_t* data, uint8_t length, uint8_t offset = 0x00) {
+				_SPIBuffer[0] = CMD_WRITE_BUFFER;
+				_SPIBuffer[1] = offset;
+				
+				std::memcpy(_SPIBuffer + 2, data, length);
+				
+				return writeSPIBuffer(2 + length);
 			}
 			
 			// -------------------------------- Auxiliary --------------------------------
@@ -987,13 +1046,13 @@ namespace YOBA {
 			}
 			
 			bool waitForBusy() {
-				auto deadline = esp_timer_get_time() + 1'000;
+				auto deadline = esp_timer_get_time() + 1'000'000;
 				
 				while (getBusyPinLevel()) {
 					taskYIELD();
 					
 					if (esp_timer_get_time() >= deadline) {
-						ESP_LOGE(_logTag, "busy pin was kept in high state too long");
+						ESP_LOGE(_logTag, "busy pin was kept in low state too long");
 						return false;
 					}
 				}
@@ -1069,28 +1128,22 @@ namespace YOBA {
 				// read current IQ configuration
 				uint8_t iqConfigCurrent = 0;
 				
-				if (!readRegUint8(REG_IQ_CONFIG, iqConfigCurrent))
+				if (!readReg(REG_IQ_CONFIG, &iqConfigCurrent, 1))
 					return false;
 				
 				// set correct IQ configuration
 				if (iqConfig == LORA_IQ_INVERTED) {
 					iqConfigCurrent &= 0xFB;
-				} else {
+				}
+				else {
 					iqConfigCurrent |= 0x04;
 				}
 				
 				// update with the new value
-				uint8_t buffer[4]{
-					0,
-					0,
-					0,
-					iqConfigCurrent
-				};
-				
-				return writeReg(REG_IQ_CONFIG, buffer, 4);
+				return writeReg(REG_IQ_CONFIG, &iqConfigCurrent, 1);
 			}
 			
-			bool updatePacketParams() {
+			bool updatePacketParams(uint8_t length = MAX_PACKET_LENGTH) {
 				if (!fixInvertedIQ(_invertIQ))
 					return false;
 				
@@ -1099,7 +1152,7 @@ namespace YOBA {
 					(uint8_t) ((_preambleLength >> 8) & 0xFF),
 					(uint8_t) (_preambleLength & 0xFF),
 					_headerType,
-					_implicitLen,
+					length,
 					_crcType,
 					_invertIQ
 				};
@@ -1114,24 +1167,18 @@ namespace YOBA {
 				// read current clamping configuration
 				uint8_t clampConfig = 0;
 				
-				if (!readRegUint8(REG_TX_CLAMP_CONFIG, clampConfig))
+				if (!readReg(REG_TX_CLAMP_CONFIG, &clampConfig, 1))
 					return false;
 				
 				// apply or undo workaround
 				if (enable) {
 					clampConfig |= 0x1E;
-				} else {
+				}
+				else {
 					clampConfig = (clampConfig & ~0x1E) | 0x08;
 				}
-				
-				uint8_t data[4]{
-					0,
-					0,
-					0,
-					clampConfig
-				};
-				
-				return writeReg(REG_TX_CLAMP_CONFIG, data, 4);
+			
+				return writeReg(REG_TX_CLAMP_CONFIG, &clampConfig, 1);
 			}
 			
 			/*!
@@ -1182,7 +1229,7 @@ namespace YOBA {
 				// get current OCP configuration
 				uint8_t ocp = 0;
 				
-				if (!readRegUint8(REG_OCP_CONFIGURATION, ocp)) {
+				if (!readReg(REG_OCP_CONFIGURATION, &ocp, 1)) {
 					ESP_LOGE(_logTag, "set output power failed: unable to read OCP configuration");
 					return false;
 				}
@@ -1196,16 +1243,9 @@ namespace YOBA {
 					return false;
 				
 				// restore OCP configuration
-				uint8_t data[4] = {
-					0,
-					0,
-					0,
-					ocp
-				};
-				
-				return writeReg(REG_OCP_CONFIGURATION, data, 4);
+				return writeReg(REG_OCP_CONFIGURATION, &ocp, 1);
 			}
-		
+			
 		public:
 			
 			// -------------------------------- Module properties --------------------------------
