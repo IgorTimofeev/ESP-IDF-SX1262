@@ -588,6 +588,64 @@ namespace YOBA {
 				return state;
 			}
 			
+			bool getPacketStatus(uint32_t& status) {
+				uint8_t data[3] = {0, 0, 0};
+				
+				if (!SPIReadCommand(CMD_GET_PACKET_STATUS, data, 3))
+					return false;
+				
+				status = ((((uint32_t)data[0]) << 16) | (((uint32_t)data[1]) << 8) | (uint32_t)data[2]);
+				
+				return true;
+			}
+			
+			bool getRSSI(float& rssi, bool packet = true) {
+				if (packet) {
+					// get last packet RSSI from packet status
+					uint32_t packetStatus = 0;
+					
+					if (!getPacketStatus(packetStatus))
+						return false;
+					
+					uint8_t rssiPkt = packetStatus & 0xFF;
+					rssi = (-1.0 * rssiPkt / 2.0);
+				}
+				else {
+					// get instantaneous RSSI value
+					uint8_t rssiRaw = 0;
+					
+					if (!SPIReadCommand(CMD_GET_RSSI_INST, &rssiRaw, 1))
+						return false;
+					
+					rssi = ((float) rssiRaw / (-2.0f));
+				}
+				
+				return true;
+			}
+			
+			bool getSNR(float& snr) {
+				// check active modem
+				if (!checkForLoRaPacketType())
+					return false;
+				
+				// get last packet SNR from packet status
+				uint32_t packetStatus = 0;
+				
+				if (!getPacketStatus(packetStatus))
+					return false;
+				
+				uint8_t snrPkt = (packetStatus >> 8) & 0xFF;
+				
+				if (snrPkt < 128) {
+					snr = (snrPkt/4.0);
+				}
+				else {
+					snr = ((snrPkt - 256)/4.0);
+				}
+				
+				return true;
+			}
+			
 		protected:
 			bool errorCheck(esp_err_t error) {
 				if (error != ESP_OK) {
