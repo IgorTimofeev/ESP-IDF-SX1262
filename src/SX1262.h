@@ -29,13 +29,12 @@ namespace YOBA {
 				spi_host_device_t SPIHostDevice,
 				uint32_t SPIFrequencyHz,
 				gpio_num_t SSPin,
-				
-				gpio_num_t busyPin,
-				gpio_num_t RSTPin
+				gpio_num_t RSTPin,
+				gpio_num_t busyPin
 			) {
 				_SSPin = SSPin;
+				_RSTPin = RSTPin;
 				_busyPin = busyPin;
-				_rstPin = RSTPin;
 				
 				// -------------------------------- GPIO output --------------------------------
 				
@@ -46,8 +45,8 @@ namespace YOBA {
 				g.pin_bit_mask = (1ULL << _SSPin);
 				
 				// RST
-				if (_rstPin != GPIO_NUM_NC) {
-					g.pin_bit_mask |= (1ULL << _rstPin);
+				if (_RSTPin != GPIO_NUM_NC) {
+					g.pin_bit_mask |= (1ULL << _RSTPin);
 				}
 				
 				g.mode = GPIO_MODE_OUTPUT;
@@ -98,7 +97,7 @@ namespace YOBA {
 			
 			virtual bool reset() {
 				// Toggling RST GPIO
-				if (_rstPin != GPIO_NUM_NC) {
+				if (_RSTPin != GPIO_NUM_NC) {
 					setRSTPinLevel(false);
 					delayMs(10);
 					setRSTPinLevel(true);
@@ -348,7 +347,7 @@ namespace YOBA {
 			}
 			
 			virtual bool setRegulatorMode(uint8_t mode) {
-				if (!setRXOrTX(CMD_SET_REGULATOR_MODE, mode)) {
+				if (!SPIWriteCommandAndUint8(CMD_SET_REGULATOR_MODE, mode)) {
 					ESP_LOGE(_logTag, "failed to set regulator mode");
 					return false;
 				}
@@ -561,6 +560,33 @@ namespace YOBA {
 				return writeSPIBuffer(2 + length);
 			}
 			
+			bool readBuffer(uint8_t* data, uint8_t length, uint8_t offset) {
+				if (!waitForBusyPin())
+					return false;
+					
+				_SPIBuffer[0] = CMD_READ_BUFFER; // W: command | R: status
+				_SPIBuffer[1] = offset;          // W: offset  | R: status
+				_SPIBuffer[2] = 0x00;            // W: -       | R: status
+				//        [3]                    // W: -       | R: result
+				
+				spi_transaction_t t {};
+				t.tx_buffer = _SPIBuffer;
+				t.rx_buffer = _SPIBuffer;
+				t.length = 8 * (3 + length);
+				
+				const auto state = errorCheck(spi_device_transmit(_SPIDevice, &t));
+				
+				if (state) {
+					std::memcpy(data, _SPIBuffer + 3, length);
+				}
+				
+				for (int i = 0; i < 3 + length; ++i) {
+					ESP_LOGI(_logTag, "readBuffer buffer[%d]: %d", i, _SPIBuffer[i]);
+				}
+				
+				return state;
+			}
+			
 		protected:
 			bool errorCheck(esp_err_t error) {
 				if (error != ESP_OK) {
@@ -590,11 +616,17 @@ namespace YOBA {
 			}
 			
 			bool waitForBusyPin(uint32_t timeoutMs = 1'000) {
+//				while (getBusyPinLevel()) {
+//					delayMs(10);
+//				}
+//
+//				return true;
+
 				if (!getBusyPinLevel() || xSemaphoreTake(_busyPinSemaphore, pdMS_TO_TICKS(timeoutMs)) == pdTRUE)
 					return true;
-				
+
 				ESP_LOGE(_logTag, "failed to wait for busy pin : timeout reached");
-				
+
 				return false;
 			}
 			
@@ -620,7 +652,7 @@ namespace YOBA {
 				}
 				
 				for (int i = 0; i < 3; ++i) {
-					ESP_LOGI(_logTag, "readCommandUint8 buffer[%d]: %d", i, _SPIBuffer[i]);
+					ESP_LOGI(_logTag, "SPIReadCommand buffer[%d]: %d", i, _SPIBuffer[i]);
 				}
 				
 				return state;
@@ -684,7 +716,7 @@ namespace YOBA {
 			
 			gpio_num_t _SSPin = GPIO_NUM_NC;
 			gpio_num_t _busyPin = GPIO_NUM_NC;
-			gpio_num_t _rstPin = GPIO_NUM_NC;
+			gpio_num_t _RSTPin = GPIO_NUM_NC;
 			
 			SemaphoreHandle_t _busyPinSemaphore;
 			spi_device_handle_t _SPIDevice {};
@@ -697,7 +729,7 @@ namespace YOBA {
 			}
 			
 			void setRSTPinLevel(bool value) {
-				gpio_set_level(_rstPin, value);
+				gpio_set_level(_RSTPin, value);
 			}
 			
 			bool getBusyPinLevel() {
@@ -807,7 +839,7 @@ namespace YOBA {
 			
 			constexpr static uint32_t RF_CRYSTAL_FREQUENCY_MHZ = 32;
 			constexpr static uint32_t RF_DIVIDER = 1ULL << 25;
-			constexpr static uint8_t MAX_PACKET_LENGTH = 255;
+			constexpr static uint8_t IMPLICIT_PACKET_LENGTH = 255;
 			
 			// -------------------------------- Commands --------------------------------
 			

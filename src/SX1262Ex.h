@@ -14,8 +14,8 @@ namespace YOBA {
 				uint32_t SPIFrequencyHz,
 				
 				gpio_num_t SSPin,
-				gpio_num_t busyPin,
 				gpio_num_t RSTPin,
+				gpio_num_t busyPin,
 				gpio_num_t DIO1Pin,
 				
 				uint16_t frequencyMHz,
@@ -32,8 +32,8 @@ namespace YOBA {
 					SPIFrequencyHz,
 					
 					SSPin,
-					busyPin,
-					RSTPin
+					RSTPin,
+					busyPin
 				))
 					return false;
 				
@@ -368,7 +368,7 @@ namespace YOBA {
 					}
 					
 					// Long Interleaver supports up to 253 bytes if CRC is enabled
-					if (_crcType == LORA_CRC_ON && (length > MAX_PACKET_LENGTH - 2)) {
+					if (_crcType == LORA_CRC_ON && (length > IMPLICIT_PACKET_LENGTH - 2)) {
 						ESP_LOGE(_logTag, "failed to transmit: packet is too long");
 						return false;
 					}
@@ -406,6 +406,164 @@ namespace YOBA {
 				return finishTransmit();
 			}
 			
+			bool fixImplicitTimeout() {
+				// fixes timeout in implicit header mode
+				// see SX1262/SX1268 datasheet, chapter 15 Known Limitations, section 15.3 for details
+				
+				//check if we're in implicit LoRa mode
+				uint8_t packetType = 0;
+				
+				if (!getPacketType(packetType))
+					return false;
+				
+				if (_headerType != LORA_HEADER_IMPLICIT || packetType != PACKET_TYPE_LORA) {
+					// not in the correct mode, nothing to do here
+					return true;
+				}
+				
+				// stop RTC counter
+				uint8_t rtcStop = 0x00;
+			
+				if (!SPIWriteRegister(REG_RTC_CTRL, &rtcStop, 1))
+					return false;
+				
+				// read currently active event
+				uint8_t rtcEvent = 0;
+				
+				if (!SPIWriteRegister(REG_EVENT_MASK, &rtcEvent, 1))
+					return false;
+				
+				// clear events
+				rtcEvent |= 0x02;
+				if (!SPIWriteRegister(REG_EVENT_MASK, &rtcEvent, 1))
+					return false;
+				
+				return true;
+			}
+			
+			bool getPacketLength(uint8_t& length, uint8_t& offset) {
+				uint8_t packetType = 0;
+				
+				if (!getPacketType(packetType))
+					return false;
+				
+				// in implicit mode, return the cached value if the offset was not requested
+				if ((packetType == PACKET_TYPE_LORA) && (_headerType == LORA_HEADER_IMPLICIT) && (!offset)) {
+					length = IMPLICIT_PACKET_LENGTH;
+					offset = 0;
+					
+					return true;
+				}
+				
+				// if offset was requested, or in explicit mode, we always have to perform the SPI transaction
+				uint8_t data[] = {
+					0,
+					0
+				};
+				
+				if (!SPIReadCommand(CMD_GET_RX_BUFFER_STATUS, data, 2))
+					return false;
+				
+				offset = data[1];
+				length = data[0];
+				
+				return true;
+			}
+			
+			bool finishReceive() {
+				if (!setStandby()) {
+					ESP_LOGE(_logTag, "failed to receive: unable to enter standby mode");
+					return false;
+				}
+				
+				// try to fix timeout error in implicit header mode
+				// check for modem type and header mode is done in fixImplicitTimeout()
+				if (!fixImplicitTimeout())
+					return false;
+				
+				// clear interrupt flags
+				return clearIRQStatus();
+			}
+			
+			bool receive(uint8_t* data, uint8_t& length, uint32_t timeoutMs = 0) {
+				if (!setStandby()) {
+					ESP_LOGE(_logTag, "failed to receive: unable to enter standby mode");
+					return false;
+				}
+				
+				// IRQ
+				uint8_t DIO1IRQMask = IRQ_RX_DONE;
+				
+				if (timeoutMs > 0) {
+					DIO1IRQMask |= IRQ_TIMEOUT;
+				}
+				
+				if (!setDioIRQParams(DIO1IRQMask, DIO1IRQMask))
+					return false;
+				
+				if (!setBufferBaseAddress())
+					return false;
+				
+				if (!clearIRQStatus())
+					return false;
+				
+				if (!updatePacketParams())
+					return false;
+				
+				if (!setRX(timeoutMs * 1000))
+					return false;
+				
+				// Wait for packet transmission or timeout
+				if (!getDIO1PinLevel() && xSemaphoreTake(_DIO1PinSemaphore, portMAX_DELAY) != pdTRUE) {
+					ESP_LOGE(_logTag, "failed to receive: semaphore timeout reached");
+					
+					finishReceive();
+					
+					return false;
+				}
+				
+				// Checking IRQ status for timeout
+				uint16_t IRQStatus = 0;
+				
+				if (!getIRQStatus(IRQStatus))
+					return false;
+				
+				// Clearing IRQ flags
+				if (!finishReceive())
+					return false;
+				
+				if (IRQStatus & IRQ_TIMEOUT) {
+					ESP_LOGE(_logTag, "failed to receive: IRQ timeout reached");
+					
+					return false;
+				}
+				
+				// check integrity CRC
+				// Report CRC mismatch when there's a payload CRC error, or a header error and no valid header (to avoid false alarm from previous packet)
+				if ((IRQStatus & IRQ_CRC_ERR) || ((IRQStatus & IRQ_HEADER_ERR) && !(IRQStatus & IRQ_HEADER_VALID))) {
+					ESP_LOGE(_logTag, "failed to receive: CRC mismatch");
+					
+					return false;
+				}
+				
+				// get packet length and Rx buffer offset
+				uint8_t offset = 0;
+				
+				if (!getPacketLength(length, offset))
+					return false;
+				
+				ESP_LOGI(_logTag, "packet length: %d", length);
+				
+				// read packet data starting at offset
+				if (!readBuffer(data, length, offset))
+					return false;
+				
+				if (!clearIRQStatus())
+					return false;
+					
+				return true;
+			}
+			
 		private:
 			constexpr static const char* _logTag = "SX1262Ex";
 			
@@ -439,7 +597,7 @@ namespace YOBA {
 				);
 			}
 			
-			bool updatePacketParams(uint8_t length = MAX_PACKET_LENGTH) {
+			bool updatePacketParams(uint8_t length = IMPLICIT_PACKET_LENGTH) {
 				return setPacketParams(
 					_preambleLength,
 					_headerType,
