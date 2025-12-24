@@ -1,6 +1,14 @@
 
 // Based on excellent work of https://github.com/jgromes/RadioLib/
-// And adapted for ESP-IDF realities without Arduino shitware
+// and adapted for ESP-IDF realities without Arduino shitware
+//
+// - Replaced GPIO polling loops with interrupt-based FreeRTOS semaphores
+// - Replaced HALs with native SPI and DMA transactions
+// - Separated module interaction into 2 classes:
+//     SX1262 is used for direct access - it contains register map and provides only basic methods for reading and
+//       writing data without any abstractions, caching and overhead
+//     SX1262Ex is based on the first one and provides high-level abstractions with all the necessary checks and
+//       convenient methods
 
 #pragma once
 
@@ -58,9 +66,16 @@ namespace YOBA {
 					g.mode = GPIO_MODE_INPUT;
 					g.pull_up_en = GPIO_PULLUP_ENABLE;
 					g.pull_down_en = GPIO_PULLDOWN_DISABLE;
-					g.intr_type = GPIO_INTR_DISABLE;
+					g.intr_type = GPIO_INTR_NEGEDGE;
 					gpio_config(&g);
 				}
+				
+				// -------------------------------- Interrupts --------------------------------
+				
+				_busyPinSemaphore = xSemaphoreCreateBinary();
+				
+				gpio_install_isr_service(0);
+				gpio_isr_handler_add(_busyPin, onBusyPinInterrupt, this);
 				
 				// -------------------------------- SPI --------------------------------
 				
@@ -68,7 +83,7 @@ namespace YOBA {
 				// CPOL = 0, CPHA = 0
 				SPIInterfaceConfig.mode = 0;
 				SPIInterfaceConfig.clock_speed_hz = SPIFrequencyHz;
-				SPIInterfaceConfig.spics_io_num = -1;
+				SPIInterfaceConfig.spics_io_num = _SSPin;
 				SPIInterfaceConfig.queue_size = 1;
 				
 				auto error = spi_bus_add_device(SPIHostDevice, &SPIInterfaceConfig, &_SPIDevice);
@@ -240,8 +255,8 @@ namespace YOBA {
 				return true;
 			}
 			
-			virtual bool setRx(uint32_t timeoutUs = 0) {
-				if (!setRxOrTx(CMD_SET_RX, timeoutUs)) {
+			virtual bool setRX(uint32_t timeoutUs = 0) {
+				if (!setRXOrTX(CMD_SET_RX, timeoutUs)) {
 					ESP_LOGE(_logTag, "failed to enter RX mode");
 					return false;
 				}
@@ -249,8 +264,8 @@ namespace YOBA {
 				return true;
 			}
 			
-			virtual bool setTx(uint32_t timeoutUs = 0) {
-				if (!setRxOrTx(CMD_SET_TX, timeoutUs)) {
+			virtual bool setTX(uint32_t timeoutUs = 0) {
+				if (!setRXOrTX(CMD_SET_TX, timeoutUs)) {
 					ESP_LOGE(_logTag, "failed to enter TX mode");
 					return false;
 				}
@@ -332,7 +347,7 @@ namespace YOBA {
 			}
 			
 			virtual bool setRegulatorMode(uint8_t mode) {
-				if (!setRxOrTx(CMD_SET_REGULATOR_MODE, mode)) {
+				if (!setRXOrTX(CMD_SET_REGULATOR_MODE, mode)) {
 					ESP_LOGE(_logTag, "failed to set regulator mode");
 					return false;
 				}
@@ -498,13 +513,13 @@ namespace YOBA {
 				}
 				
 				// set PA config
-				if (!setPaConfig()) {
+				if (!setPAConfig()) {
 					ESP_LOGE(_logTag, "set output power failed: unable to set PA config");
 					return false;
 				}
 				
 				// set output power with default 200us ramp
-				if (!setTxParams(powerDBm, PA_RAMP_200U)) {
+				if (!setTXParams(powerDBm, PA_RAMP_200U)) {
 					ESP_LOGE(_logTag, "set output power failed: unable to set TX params");
 					return false;
 				}
@@ -573,25 +588,19 @@ namespace YOBA {
 				vTaskDelay(pdMS_TO_TICKS(std::max<uint32_t>(ms, portTICK_PERIOD_MS)));
 			}
 			
-			bool waitForBusy() {
-				auto deadline = esp_timer_get_time() + 1'000'000;
+			bool waitForBusyPin(uint32_t timeoutMs = 1'000) {
+				if (!getBusyPinLevel() || xSemaphoreTake(_busyPinSemaphore, pdMS_TO_TICKS(timeoutMs)) == pdTRUE)
+					return true;
 				
-				while (getBusyPinLevel()) {
-					taskYIELD();
-					
-					if (esp_timer_get_time() >= deadline) {
-						ESP_LOGE(_logTag, "busy pin was kept in low state too long");
-						return false;
-					}
-				}
+				ESP_LOGE(_logTag, "failed to wait for busy pin : timeout reached");
 				
-				return true;
+				return false;
 			}
 			
 			// -------------------------------- Reading --------------------------------
 			
 			bool SPIReadCommand(uint8_t command, uint8_t* data, uint8_t length) {
-				if (!waitForBusy())
+				if (!waitForBusyPin())
 					return false;
 				
 				_SPIBuffer[0] = command; // W: command | R: status
@@ -603,9 +612,7 @@ namespace YOBA {
 				t.rx_buffer = _SPIBuffer;
 				t.length = 8 * (2 + length);
 				
-				setSSPinLevel(false);
 				const auto state = errorCheck(spi_device_transmit(_SPIDevice, &t));
-				setSSPinLevel(true);
 				
 				if (state) {
 					std::memcpy(data, _SPIBuffer + 2, length);
@@ -619,7 +626,7 @@ namespace YOBA {
 			}
 			
 			bool SPIReadRegister(const uint16_t reg, uint8_t* data, const size_t length) {
-				if (!waitForBusy())
+				if (!waitForBusyPin())
 					return false;
 				
 				_SPIBuffer[0] = CMD_READ_REGISTER; // W: command  | R: status
@@ -633,9 +640,7 @@ namespace YOBA {
 				t.rx_buffer = _SPIBuffer;
 				t.length = 8 * (4 + length);
 				
-				setSSPinLevel(false);
 				const auto state = errorCheck(spi_device_transmit(_SPIDevice, &t));
-				setSSPinLevel(true);
 				
 				if (state) {
 					std::memcpy(data, _SPIBuffer + 4, length);
@@ -680,6 +685,7 @@ namespace YOBA {
 			gpio_num_t _busyPin = GPIO_NUM_NC;
 			gpio_num_t _rstPin = GPIO_NUM_NC;
 			
+			SemaphoreHandle_t _busyPinSemaphore;
 			spi_device_handle_t _SPIDevice {};
 			
 			constexpr static uint16_t _SPIBufferLength = 4 + 256;
@@ -696,32 +702,33 @@ namespace YOBA {
 			bool getBusyPinLevel() {
 				return gpio_get_level(_busyPin);
 			}
-
+			
+			IRAM_ATTR static void onBusyPinInterrupt(void* arg) {
+				BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+				
+				xSemaphoreGiveFromISR(reinterpret_cast<SX1262*>(arg)->_busyPinSemaphore, &xHigherPriorityTaskWoken);
+				
+				if (xHigherPriorityTaskWoken) {
+					portYIELD_FROM_ISR();
+				}
+			}
+			
 			// -------------------------------- Auxiliary --------------------------------
 			
 			bool writeSPIBuffer(uint16_t totalLength) {
-				if (!waitForBusy())
+				if (!waitForBusyPin())
 					return false;
 				
 				spi_transaction_t t {};
 				t.tx_buffer = _SPIBuffer;
 				t.length = 8 * totalLength;
 				
-				setSSPinLevel(false);
-				const auto state = errorCheck(spi_device_transmit(_SPIDevice, &t));
-				setSSPinLevel(true);
-				
-				return state;
+				return errorCheck(spi_device_transmit(_SPIDevice, &t));
 			}
 			
-			
-			inline static uint32_t getTimeoutValue(uint32_t timeoutUs) {
+			bool setRXOrTX(uint8_t command, uint32_t timeoutUs) {
 				// From datasheet: timeoutUs = timeoutValue * 15.625 µs
-				return timeoutUs / 15.625f;
-			}
-			
-			bool setRxOrTx(uint8_t command, uint32_t timeoutUs) {
-				const auto timeout = getTimeoutValue(timeoutUs);
+				const uint32_t timeout = timeoutUs / 15.625f;
 				
 				const uint8_t data[] = {
 					command,
@@ -766,7 +773,7 @@ namespace YOBA {
 			 \param paLut paLut PA lookup table raw value.
 			 \returns \ref status_codes
 		   */
-			bool setPaConfig(uint8_t paDutyCycle = 0x04, uint8_t deviceSel = PA_CONFIG_SX1262, uint8_t hpMax = PA_CONFIG_HP_MAX, uint8_t paLut = PA_CONFIG_PA_LUT) {
+			bool setPAConfig(uint8_t paDutyCycle = 0x04, uint8_t deviceSel = PA_CONFIG_SX1262, uint8_t hpMax = PA_CONFIG_HP_MAX, uint8_t paLut = PA_CONFIG_PA_LUT) {
 				const uint8_t data[5] = {
 					CMD_SET_PA_CONFIG,
 					paDutyCycle,
@@ -778,7 +785,7 @@ namespace YOBA {
 				return SPIWrite(data, 5);
 			}
 			
-			bool setTxParams(int8_t power, uint8_t rampTime) {
+			bool setTXParams(int8_t power, uint8_t rampTime) {
 				if (power < -9 || power > 22) {
 					ESP_LOGE(_logTag, "set output power failed: value %d is out of range [-9; 22]", power);
 					return false;

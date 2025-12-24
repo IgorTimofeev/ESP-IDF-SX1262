@@ -54,7 +54,7 @@ namespace YOBA {
 				_tcxoDelay = 0;
 				_headerType = LORA_HEADER_EXPLICIT;
 				
-				// -------------------------------- Interrupts --------------------------------
+				// -------------------------------- GPIO input --------------------------------
 				
 				// DIO1
 				gpio_config_t g = {};
@@ -65,10 +65,12 @@ namespace YOBA {
 				g.intr_type = GPIO_INTR_POSEDGE;
 				gpio_config(&g);
 				
+				// -------------------------------- Interrupts --------------------------------
+	
+				_DIO1PinSemaphore = xSemaphoreCreateBinary();
+				
 				gpio_install_isr_service(0);
 				gpio_isr_handler_add(_DIO1Pin, onDIO1PinInterrupt, this);
-				
-				_DIO1ISRSemaphore = xSemaphoreCreateBinary();
 				
 				// -------------------------------- Initialization --------------------------------
 				
@@ -105,15 +107,11 @@ namespace YOBA {
 				if (!calibrate(CALIBRATE_ALL))
 					return false;
 				
-				// Wait for calibration completion
-				delayMs(5);
-				
-				waitForBusy();
+				// Wait for calibration completion end. Normally this should take 3.5 ms
+				waitForBusyPin(1'000);
 				
 				if (!setRegulatorMode(useLDORegulator ? REGULATOR_LDO : REGULATOR_DC_DC))
 					return false;
-				
-				// -------------------------------- Publicly accessible settings --------------------------------
 				
 				if (!setCodingRate(codingRate))
 					return false;
@@ -397,15 +395,14 @@ namespace YOBA {
 					return false;
 				
 				// LET'S FUCKING MOOOOVE
-				if (!setTx())
+				if (!setTX())
 					return false;
 				
 				// Wait for packet transmission or timeout
-				if (xSemaphoreTake(_DIO1ISRSemaphore, timeoutMs == 0 ? portMAX_DELAY : pdMS_TO_TICKS(timeoutMs)) != pdTRUE) {
-					ESP_LOGE(_logTag, "failed to transmit: timeout reached");
-					
+				if (getDIO1PinLevel() || xSemaphoreTake(_DIO1PinSemaphore, timeoutMs == 0 ? portMAX_DELAY : pdMS_TO_TICKS(timeoutMs)) == pdTRUE)
 					return finishTransmit();
-				}
+				
+				ESP_LOGE(_logTag, "failed to transmit: timeout reached");
 				
 				return finishTransmit();
 			}
@@ -430,7 +427,7 @@ namespace YOBA {
 			bool _ldrOptimize = false;
 			bool _ldrOptimizeAuto = true;
 			
-			SemaphoreHandle_t _DIO1ISRSemaphore;
+			SemaphoreHandle_t _DIO1PinSemaphore;
 			
 			bool updateModulationParams() {
 				return setModulationParams(
@@ -498,7 +495,7 @@ namespace YOBA {
 			IRAM_ATTR void onDIO1PinInterrupt() {
 				BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 				
-				xSemaphoreGiveFromISR(_DIO1ISRSemaphore, &xHigherPriorityTaskWoken);
+				xSemaphoreGiveFromISR(_DIO1PinSemaphore, &xHigherPriorityTaskWoken);
 				
 				if (xHigherPriorityTaskWoken) {
 					portYIELD_FROM_ISR();
