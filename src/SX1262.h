@@ -273,7 +273,7 @@ namespace YOBA {
 				return true;
 			}
 			
-			virtual bool setRxTxFallbackMode(uint8_t value = RX_TX_FALLBACK_MODE_STDBY_RC) {
+			virtual bool setRXTXFallbackMode(uint8_t value = RX_TX_FALLBACK_MODE_STDBY_RC) {
 				if (!SPIWriteCommandAndUint8(CMD_SET_RX_TX_FALLBACK_MODE, value)) {
 					ESP_LOGE(_logTag, "failed to configure RX/TX fallback mode");
 					return false;
@@ -384,7 +384,7 @@ namespace YOBA {
 				return true;
 			}
 			
-			virtual bool setDioIRQParams(uint16_t irqMask = IRQ_NONE, uint16_t dio1Mask = IRQ_NONE, uint16_t dio2Mask = IRQ_NONE, uint16_t dio3Mask = IRQ_NONE) {
+			virtual bool setDIOIRQParams(uint16_t irqMask = IRQ_NONE, uint16_t dio1Mask = IRQ_NONE, uint16_t dio2Mask = IRQ_NONE, uint16_t dio3Mask = IRQ_NONE) {
 				const uint8_t data[] = {
 					CMD_SET_DIO_IRQ_PARAMS,
 					

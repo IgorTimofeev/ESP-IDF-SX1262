@@ -90,7 +90,7 @@ namespace YOBA {
 				if (!setPacketType(PACKET_TYPE_LORA))
 					return false;
 				
-				if (!setRxTxFallbackMode(RX_TX_FALLBACK_MODE_STDBY_RC))
+				if (!setRXTXFallbackMode(RX_TX_FALLBACK_MODE_STDBY_RC))
 					return false;
 				
 				// Set some CAD parameters - will be overwritten when calling CAD anyway
@@ -100,7 +100,7 @@ namespace YOBA {
 				if (!clearIRQStatus())
 					return false;
 				
-				if (!setDioIRQParams())
+				if (!setDIOIRQParams())
 					return false;
 				
 				if (!calibrate(CALIBRATE_ALL))
@@ -344,15 +344,31 @@ namespace YOBA {
 			}
 			
 			bool finishTransmit() {
-				// clear interrupt flags
+				if (!setStandby())
+					return false;
+				
 				if (!clearIRQStatus())
 					return false;
 				
-				// set mode to standby to disable transmitter/RF switch
-				return setStandby();
+				return true;
 			}
 			
-			bool transmit(const uint8_t* data, uint8_t length, uint32_t timeoutMs = 0) {
+			bool waitForDIO1Semaphore(uint32_t timeoutUs) {
+				return
+					// Already in high
+					getDIO1PinLevel()
+					// Wait for high
+					|| xSemaphoreTake(
+						_DIO1PinSemaphore,
+						timeoutUs == 0
+							// Zero timeout means infinite waiting
+							? portMAX_DELAY
+							// FreeRTOS tasks can handle at least portTICK_PERIOD_MS, also adding 100 ms for пропёрживание
+							: pdMS_TO_TICKS(std::max(timeoutUs / 1000 + 100, portTICK_PERIOD_MS))
+					) == pdTRUE;
+			}
+			
+			bool transmit(const uint8_t* data, uint8_t length, uint32_t timeoutUs = 0) {
 				// set mode to standby
 				if (!setStandby()) {
 					ESP_LOGE(_logTag, "failed to transmit: unable to enter standby mode");
@@ -377,7 +393,12 @@ namespace YOBA {
 				if (!updatePacketParams(length))
 					return false;
 				
-				if (!setDioIRQParams(IRQ_TX_DONE | IRQ_TIMEOUT, IRQ_TX_DONE))
+				uint16_t IRQMask = IRQ_TX_DONE;
+				
+				if (timeoutUs > 0)
+					IRQMask |= IRQ_TIMEOUT;
+				
+				if (!setDIOIRQParams(IRQMask, IRQMask))
 					return false;
 				
 				if (!setBufferBaseAddress())
@@ -394,16 +415,30 @@ namespace YOBA {
 					return false;
 				
 				// LET'S FUCKING MOOOOVE
-				if (!setTX())
+				if (!setTX(timeoutUs))
 					return false;
 				
-				// Wait for packet transmission or timeout
-				if (getDIO1PinLevel() || xSemaphoreTake(_DIO1PinSemaphore, timeoutMs == 0 ? portMAX_DELAY : pdMS_TO_TICKS(timeoutMs)) == pdTRUE)
+				if (!waitForDIO1Semaphore(timeoutUs)) {
+					ESP_LOGE(_logTag, "failed to transmit: semaphore timeout reached");
+					
 					return finishTransmit();
+				}
 				
-				ESP_LOGE(_logTag, "failed to transmit: timeout reached");
+				uint16_t IRQStatus = 0;
 				
-				return finishTransmit();
+				if (!getIRQStatus(IRQStatus))
+					return false;
+				
+				if (!finishTransmit())
+					return false;
+				
+				if (IRQStatus & IRQ_TIMEOUT) {
+					ESP_LOGE(_logTag, "failed to transmit: IRQ timeout reached");
+					
+					return false;
+				}
+				
+				return true;
 			}
 			
 			bool fixImplicitTimeout() {
@@ -471,10 +506,8 @@ namespace YOBA {
 			}
 			
 			bool finishReceive() {
-				if (!setStandby()) {
-					ESP_LOGE(_logTag, "failed to receive: unable to enter standby mode");
+				if (!setStandby())
 					return false;
-				}
 				
 				// try to fix timeout error in implicit header mode
 				// check for modem type and header mode is done in fixImplicitTimeout()
@@ -485,50 +518,43 @@ namespace YOBA {
 				return clearIRQStatus();
 			}
 			
-			bool receive(uint8_t* data, uint8_t& length, uint32_t timeoutMs = 0) {
-				if (!setStandby()) {
-					ESP_LOGE(_logTag, "failed to receive: unable to enter standby mode");
-					return false;
-				}
-				
-				// IRQ
-				uint8_t DIO1IRQMask = IRQ_RX_DONE;
-				
-				if (timeoutMs > 0) {
-					DIO1IRQMask |= IRQ_TIMEOUT;
-				}
-				
-				if (!setDioIRQParams(DIO1IRQMask, DIO1IRQMask))
+			bool receive(uint8_t* data, uint8_t& length, uint32_t timeoutUs = 0) {
+				if (!setStandby())
 					return false;
 				
-				if (!setBufferBaseAddress())
+				uint16_t IRQMask = IRQ_RX_DONE;
+				
+				if (timeoutUs > 0)
+					IRQMask |= IRQ_TIMEOUT;
+				
+				if (!setDIOIRQParams(IRQMask, IRQMask))
 					return false;
 				
 				if (!clearIRQStatus())
 					return false;
 				
+				if (!setBufferBaseAddress())
+					return false;
+				
 				if (!updatePacketParams())
 					return false;
 				
-				if (!setRX(timeoutMs * 1000))
+				// LET'S FUCKING MOOOOVE
+				if (!setRX(timeoutUs))
 					return false;
 				
-				// Wait for packet transmission or timeout
-				if (!getDIO1PinLevel() && xSemaphoreTake(_DIO1PinSemaphore, portMAX_DELAY) != pdTRUE) {
+				if (!waitForDIO1Semaphore(timeoutUs)) {
 					ESP_LOGE(_logTag, "failed to receive: semaphore timeout reached");
-					
 					finishReceive();
 					
 					return false;
 				}
 				
-				// Checking IRQ status for timeout
 				uint16_t IRQStatus = 0;
 				
 				if (!getIRQStatus(IRQStatus))
 					return false;
 				
-				// Clearing IRQ flags
 				if (!finishReceive())
 					return false;
 				
@@ -552,15 +578,12 @@ namespace YOBA {
 				if (!getPacketLength(length, offset))
 					return false;
 				
-				ESP_LOGI(_logTag, "packet length: %d", length);
+				ESP_LOGI(_logTag, "receive() length: %d, offset: %d", length, offset);
 				
 				// read packet data starting at offset
 				if (!readBuffer(data, length, offset))
 					return false;
 				
-				if (!clearIRQStatus())
-					return false;
-					
 				return true;
 			}
 			
