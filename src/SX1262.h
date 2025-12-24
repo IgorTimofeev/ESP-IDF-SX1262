@@ -97,14 +97,13 @@ namespace YOBA {
 			}
 			
 			virtual bool reset() {
-				if (_rstPin == GPIO_NUM_NC)
-					return true;
-				
 				// Toggling RST GPIO
-				setRSTPinLevel(false);
-				delayMs(10);
-				setRSTPinLevel(true);
-				delayMs(10);
+				if (_rstPin != GPIO_NUM_NC) {
+					setRSTPinLevel(false);
+					delayMs(10);
+					setRSTPinLevel(true);
+					delayMs(10);
+				}
 				
 				// Trying to set mode to standby - SX126x often refuses first few commands after reset
 				auto start = esp_timer_get_time();
