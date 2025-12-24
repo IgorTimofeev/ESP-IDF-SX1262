@@ -578,7 +578,7 @@ namespace YOBA {
 				if (!getPacketLength(length, offset))
 					return false;
 				
-				ESP_LOGI(_logTag, "receive() length: %d, offset: %d", length, offset);
+//				ESP_LOGI(_logTag, "receive() length: %d, offset: %d", length, offset);
 				
 				// read packet data starting at offset
 				if (!readBuffer(data, length, offset))
