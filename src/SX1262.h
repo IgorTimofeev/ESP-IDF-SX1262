@@ -488,7 +488,7 @@ namespace YOBA {
 				return SPIWriteRegister(REG_TX_CLAMP_CONFIG, &clampConfig, 1);
 			}
 			
-			virtual bool setOutputPower(int8_t power) {
+			virtual bool setOutputPower(int8_t powerDBm) {
 				// get current OCP configuration
 				uint8_t ocp = 0;
 				
@@ -504,7 +504,7 @@ namespace YOBA {
 				}
 				
 				// set output power with default 200us ramp
-				if (!setTxParams(power, PA_RAMP_200U)) {
+				if (!setTxParams(powerDBm, PA_RAMP_200U)) {
 					ESP_LOGE(_logTag, "set output power failed: unable to set TX params");
 					return false;
 				}

@@ -9,6 +9,7 @@
 namespace YOBA {
 	class SX1262Ex : public SX1262 {
 		public:
+			using SX1262::setup;
 			bool setup(
 				spi_host_device_t SPIHostDevice,
 				uint32_t SPIFrequencyHz,
@@ -23,7 +24,7 @@ namespace YOBA {
 				uint8_t spreadingFactor,
 				uint8_t codingRate,
 				uint8_t syncWord,
-				int8_t power,
+				int8_t powerDBm,
 				uint16_t preambleLength,
 				bool useLDORegulator = false
 			) {
@@ -147,7 +148,7 @@ namespace YOBA {
 				if (!setTXClampConfig(true))
 					return false;
 				
-				if (!setOutputPower(power))
+				if (!setOutputPower(powerDBm))
 					return false;
 				
 				return true;
@@ -344,8 +345,6 @@ namespace YOBA {
 				
 				return updateModulationParams();
 			}
-			
-			
 			
 			bool finishTransmit() {
 				// clear interrupt flags
