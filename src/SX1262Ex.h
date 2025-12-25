@@ -371,7 +371,7 @@ namespace YOBA {
 			bool transmit(const uint8_t* data, uint8_t length, uint32_t timeoutUs = 0) {
 				// set mode to standby
 				if (!setStandby()) {
-					ESP_LOGE(_logTag, "failed to transmit: unable to enter standby mode");
+					ESP_LOGE(_logTag, "failed to write: unable to enter standby mode");
 					return false;
 				}
 				
@@ -379,13 +379,13 @@ namespace YOBA {
 				if (_codingRate > LORA_CR_4_8) {
 					// Long Interleaver needs at least 8 bytes
 					if (length < 8) {
-						ESP_LOGE(_logTag, "failed to transmit: packet is too short");
+						ESP_LOGE(_logTag, "failed to write: packet is too short");
 						return false;
 					}
 					
 					// Long Interleaver supports up to 253 bytes if CRC is enabled
 					if (_crcType == LORA_CRC_ON && (length > IMPLICIT_PACKET_LENGTH - 2)) {
-						ESP_LOGE(_logTag, "failed to transmit: packet is too long");
+						ESP_LOGE(_logTag, "failed to write: packet is too long");
 						return false;
 					}
 				}
@@ -419,7 +419,7 @@ namespace YOBA {
 					return false;
 				
 				if (!waitForDIO1Semaphore(timeoutUs)) {
-					ESP_LOGE(_logTag, "failed to transmit: semaphore timeout reached");
+					ESP_LOGE(_logTag, "failed to write: semaphore timeout reached");
 					
 					return finishTransmit();
 				}
@@ -433,7 +433,7 @@ namespace YOBA {
 					return false;
 				
 				if (IRQStatus & IRQ_TIMEOUT) {
-					ESP_LOGE(_logTag, "failed to transmit: IRQ timeout reached");
+					ESP_LOGE(_logTag, "failed to write: IRQ timeout reached");
 					
 					return false;
 				}
@@ -544,7 +544,7 @@ namespace YOBA {
 					return false;
 				
 				if (!waitForDIO1Semaphore(timeoutUs)) {
-					ESP_LOGE(_logTag, "failed to receive: semaphore timeout reached");
+					ESP_LOGE(_logTag, "failed to read: semaphore timeout reached");
 					finishReceive();
 					
 					return false;
@@ -559,7 +559,7 @@ namespace YOBA {
 					return false;
 				
 				if (IRQStatus & IRQ_TIMEOUT) {
-					ESP_LOGE(_logTag, "failed to receive: IRQ timeout reached");
+					ESP_LOGE(_logTag, "failed to read: IRQ timeout reached");
 					
 					return false;
 				}
@@ -567,7 +567,7 @@ namespace YOBA {
 				// check integrity CRC
 				// Report CRC mismatch when there's a payload CRC error, or a header error and no valid header (to avoid false alarm from previous packet)
 				if ((IRQStatus & IRQ_CRC_ERR) || ((IRQStatus & IRQ_HEADER_ERR) && !(IRQStatus & IRQ_HEADER_VALID))) {
-					ESP_LOGE(_logTag, "failed to receive: CRC mismatch");
+					ESP_LOGE(_logTag, "failed to read: CRC mismatch");
 					
 					return false;
 				}
