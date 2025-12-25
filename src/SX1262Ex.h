@@ -65,7 +65,7 @@ namespace YOBA {
 				gpio_config(&g);
 				
 				// -------------------------------- Interrupts --------------------------------
-	
+				
 				_DIO1PinSemaphore = xSemaphoreCreateBinary();
 				
 				gpio_install_isr_service(0);
@@ -359,19 +359,19 @@ namespace YOBA {
 					getDIO1PinLevel()
 					// Wait for high
 					|| xSemaphoreTake(
-						_DIO1PinSemaphore,
-						timeoutUs == 0
-							// Zero timeout means infinite waiting
-							? portMAX_DELAY
-							// FreeRTOS tasks can handle at least portTICK_PERIOD_MS, also adding 100 ms for пропёрживание
-							: pdMS_TO_TICKS(std::max(timeoutUs / 1000 + 100, portTICK_PERIOD_MS))
-					) == pdTRUE;
+						   _DIO1PinSemaphore,
+						   timeoutUs == 0
+						   // Zero timeout means infinite waiting
+						   ? portMAX_DELAY
+						   // FreeRTOS tasks can handle at least portTICK_PERIOD_MS, also adding 100 ms for пропёрживание
+						   : pdMS_TO_TICKS(std::max(timeoutUs / 1000 + 100, portTICK_PERIOD_MS))
+					   ) == pdTRUE;
 			}
 			
 			bool transmit(const uint8_t* data, uint8_t length, uint32_t timeoutUs = 0) {
 				// set mode to standby
 				if (!setStandby()) {
-					ESP_LOGE(_logTag, "failed to write: unable to enter standby mode");
+					ESP_LOGE(_logTag, "failed to transmit: unable to enter standby mode");
 					return false;
 				}
 				
@@ -379,13 +379,13 @@ namespace YOBA {
 				if (_codingRate > LORA_CR_4_8) {
 					// Long Interleaver needs at least 8 bytes
 					if (length < 8) {
-						ESP_LOGE(_logTag, "failed to write: packet is too short");
+						ESP_LOGE(_logTag, "failed to transmit: packet is too short");
 						return false;
 					}
 					
 					// Long Interleaver supports up to 253 bytes if CRC is enabled
 					if (_crcType == LORA_CRC_ON && (length > IMPLICIT_PACKET_LENGTH - 2)) {
-						ESP_LOGE(_logTag, "failed to write: packet is too long");
+						ESP_LOGE(_logTag, "failed to transmit: packet is too long");
 						return false;
 					}
 				}
@@ -419,7 +419,7 @@ namespace YOBA {
 					return false;
 				
 				if (!waitForDIO1Semaphore(timeoutUs)) {
-					ESP_LOGE(_logTag, "failed to write: semaphore timeout reached");
+					ESP_LOGE(_logTag, "failed to transmit: semaphore timeout reached");
 					
 					return finishTransmit();
 				}
@@ -433,7 +433,7 @@ namespace YOBA {
 					return false;
 				
 				if (IRQStatus & IRQ_TIMEOUT) {
-					ESP_LOGE(_logTag, "failed to write: IRQ timeout reached");
+					ESP_LOGE(_logTag, "failed to transmit: IRQ timeout reached");
 					
 					return false;
 				}
@@ -458,7 +458,7 @@ namespace YOBA {
 				
 				// stop RTC counter
 				uint8_t rtcStop = 0x00;
-			
+				
 				if (!SPIWriteRegister(REG_RTC_CTRL, &rtcStop, 1))
 					return false;
 				
@@ -544,7 +544,7 @@ namespace YOBA {
 					return false;
 				
 				if (!waitForDIO1Semaphore(timeoutUs)) {
-					ESP_LOGE(_logTag, "failed to read: semaphore timeout reached");
+					ESP_LOGE(_logTag, "failed to receive: semaphore timeout reached");
 					finishReceive();
 					
 					return false;
@@ -559,7 +559,7 @@ namespace YOBA {
 					return false;
 				
 				if (IRQStatus & IRQ_TIMEOUT) {
-					ESP_LOGE(_logTag, "failed to read: IRQ timeout reached");
+					ESP_LOGE(_logTag, "failed to receive: IRQ timeout reached");
 					
 					return false;
 				}
@@ -567,7 +567,7 @@ namespace YOBA {
 				// check integrity CRC
 				// Report CRC mismatch when there's a payload CRC error, or a header error and no valid header (to avoid false alarm from previous packet)
 				if ((IRQStatus & IRQ_CRC_ERR) || ((IRQStatus & IRQ_HEADER_ERR) && !(IRQStatus & IRQ_HEADER_VALID))) {
-					ESP_LOGE(_logTag, "failed to read: CRC mismatch");
+					ESP_LOGE(_logTag, "failed to receive: CRC mismatch");
 					
 					return false;
 				}
@@ -577,7 +577,7 @@ namespace YOBA {
 				
 				if (!getPacketLength(length, offset))
 					return false;
-				
+
 //				ESP_LOGI(_logTag, "receive() length: %d, offset: %d", length, offset);
 				
 				// read packet data starting at offset
@@ -586,7 +586,7 @@ namespace YOBA {
 				
 				return true;
 			}
-			
+		
 		private:
 			constexpr static const char* _logTag = "SX1262Ex";
 			
