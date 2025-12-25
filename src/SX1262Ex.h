@@ -607,7 +607,7 @@ namespace YOBA {
 			
 			// LoRa low data rate optimization
 			bool _ldrOptimize = false;
-			bool _ldrOptimizeAuto = true;
+			bool _ldrOptimizeAuto = false;
 			
 			SemaphoreHandle_t _DIO1PinSemaphore;
 			
@@ -640,7 +640,8 @@ namespace YOBA {
 					} else {
 						_ldrOptimize = LORA_LOW_DATA_RATE_OPTIMIZE_OFF;
 					}
-				} else {
+				}
+				else {
 					_ldrOptimize = value;
 				}
 			}
