@@ -130,9 +130,6 @@ namespace YOBA {
 				if (!setCRC(2))
 					return false;
 				
-				if (!setSymbNumTimeout(10))
-					return false;
-				
 				if (!invertIQ(false))
 					return false;
 				
