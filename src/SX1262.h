@@ -256,6 +256,15 @@ namespace YOBA {
 				return true;
 			}
 			
+			virtual bool setSymbNumTimeout(uint8_t value) {
+				if (!SPIWriteCommandAndUint8(CMD_SET_LORA_SYMB_NUM_TIMEOUT, value)) {
+					ESP_LOGE(_logTag, "failed to set symb num timeout");
+					return false;
+				}
+				
+				return true;
+			}
+			
 			virtual bool setRX(uint32_t timeoutUs = 0) {
 				if (!setRXOrTX(CMD_SET_RX, timeoutUs)) {
 					ESP_LOGE(_logTag, "failed to enter RX mode");
