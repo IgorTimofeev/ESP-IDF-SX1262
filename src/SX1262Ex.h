@@ -344,6 +344,9 @@ namespace YOBA {
 			}
 			
 			bool finishTransmit() {
+				if (!setStandby())
+					return false;
+				
 				if (!clearIRQStatus())
 					return false;
 				
@@ -366,6 +369,9 @@ namespace YOBA {
 			}
 			
 			bool transmit(const uint8_t* data, uint8_t length, uint32_t timeoutUs = 0) {
+				if (!setStandby())
+					return false;
+				
 				// check packet length
 				if (_codingRate > LORA_CR_4_8) {
 					// Long Interleaver needs at least 8 bytes
@@ -497,6 +503,9 @@ namespace YOBA {
 			}
 			
 			bool finishReceive() {
+				if (!setStandby())
+					return false;
+				
 				// try to fix timeout error in implicit header mode
 				// check for modem type and header mode is done in fixImplicitTimeout()
 				if (!fixImplicitTimeout())
@@ -507,6 +516,9 @@ namespace YOBA {
 			}
 			
 			bool receive(uint8_t* data, uint8_t& length, uint32_t timeoutUs = 0) {
+				if (!setStandby())
+					return false;
+				
 				uint16_t IRQMask = IRQ_RX_DONE;
 				
 				if (timeoutUs > 0)
