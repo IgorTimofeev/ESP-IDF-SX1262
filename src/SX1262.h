@@ -518,7 +518,7 @@ namespace YOBA {
 				uint8_t ocp = 0;
 				
 				if (!SPIReadRegister(REG_OCP_CONFIGURATION, &ocp, 1)) {
-					ESP_LOGE(_logTag, "set output power failed: unable to read OCP configuration");
+					ESP_LOGE(_logTag, "set output power failed: unable to receive OCP configuration");
 					return false;
 				}
 				
@@ -608,49 +608,36 @@ namespace YOBA {
 				return true;
 			}
 			
-			bool getRSSI(float& rssi, bool packet = true) {
-				if (packet) {
-					// get last packet RSSI from packet status
-					uint32_t packetStatus = 0;
-					
-					if (!getPacketStatus(packetStatus))
-						return false;
-					
-					uint8_t rssiPkt = packetStatus & 0xFF;
-					rssi = (-1.0 * rssiPkt / 2.0);
-				}
-				else {
-					// get instantaneous RSSI value
-					uint8_t rssiRaw = 0;
-					
-					if (!SPIReadCommand(CMD_GET_RSSI_INST, &rssiRaw, 1))
-						return false;
-					
-					rssi = ((float) rssiRaw / (-2.0f));
-				}
-				
-				return true;
-			}
-			
-			bool getSNR(float& snr) {
-				// check active modem
-				if (!checkForLoRaPacketType())
-					return false;
-				
-				// get last packet SNR from packet status
+			bool getRSSI(float& rssi) {
 				uint32_t packetStatus = 0;
 				
 				if (!getPacketStatus(packetStatus))
 					return false;
 				
-				uint8_t snrPkt = (packetStatus >> 8) & 0xFF;
+				rssi = getRSSIFromPacketStatus(packetStatus);
 				
-				if (snrPkt < 128) {
-					snr = (snrPkt/4.0);
-				}
-				else {
-					snr = ((snrPkt - 256)/4.0);
-				}
+				return true;
+			}
+
+			// get instantaneous RSSI value
+			bool getRSSIInst(float& rssi) {
+				uint8_t rssiRaw = 0;
+				
+				if (!SPIReadCommand(CMD_GET_RSSI_INST, &rssiRaw, 1))
+					return false;
+				
+				rssi = ((float) rssiRaw / (-2.0f));
+				
+				return true;
+			}
+			
+			bool getSNR(float& snr) {
+				uint32_t packetStatus = 0;
+				
+				if (!getPacketStatus(packetStatus))
+					return false;
+				
+				snr = getSNRFromPacketStatus(packetStatus);
 				
 				return true;
 			}
@@ -899,6 +886,23 @@ namespace YOBA {
 				};
 				
 				return SPIWrite(data, 3);
+			}
+			
+			float getRSSIFromPacketStatus(uint32_t packetStatus) {
+				uint8_t rssiPkt = packetStatus & 0xFF;
+				
+				return  1.0 * rssiPkt / 2.0;
+			}
+			
+			float getSNRFromPacketStatus(uint32_t packetStatus) {
+				uint8_t snrPkt = (packetStatus >> 8) & 0xFF;
+				
+				if (snrPkt < 128) {
+					return snrPkt / 4.f;
+				}
+				else {
+					return (snrPkt - 256) / 4.f;
+				}
 			}
 			
 		public:
