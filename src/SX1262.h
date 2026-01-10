@@ -24,9 +24,19 @@
 #include <esp_log.h>
 
 namespace YOBA {
+	enum class SX1262Error {
+		none,
+		invalidChip,
+		SPI,
+		timeout,
+		invalidArgument,
+		invalidPacketType,
+		invalidChecksum
+	};
+	
 	class SX1262 {
 		public:
-			virtual bool setup(
+			virtual SX1262Error setup(
 				spi_host_device_t SPIHostDevice,
 				uint32_t SPIFrequencyHz,
 				gpio_num_t SSPin,
@@ -90,13 +100,13 @@ namespace YOBA {
 				
 				auto error = spi_bus_add_device(SPIHostDevice, &SPIInterfaceConfig, &_SPIDevice);
 				
-				if (!errorCheck(error))
-					return false;
+				if (!checkESPError(error))
+					return SX1262Error::SPI;
 				
-				return true;
+				return SX1262Error::none;
 			}
 			
-			virtual bool reset() {
+			virtual SX1262Error reset() {
 				// Toggling RST GPIO
 				if (_RSTPin != GPIO_NUM_NC) {
 					setRSTPinLevel(false);
@@ -109,8 +119,8 @@ namespace YOBA {
 				auto start = esp_timer_get_time();
 				
 				while (true) {
-					if (setStandby())
-						return true;
+					if (setStandby() == SX1262Error::none)
+						return SX1262Error::none;
 					
 					// standby command failed, check timeout and try again
 					if (esp_timer_get_time() - start >= 1'000'000) {
@@ -122,10 +132,10 @@ namespace YOBA {
 					delayMs(10);
 				}
 				
-				return false;
+				return SX1262Error::none;
 			}
 			
-			virtual bool validateChip() {
+			virtual SX1262Error validateChip() {
 				for (uint8_t i = 0; i < 10; ++i) {
 					uint8_t buffer[16] = {0};
 					SPIReadRegister(REG_VERSION_STRING, buffer, 16);
@@ -133,7 +143,7 @@ namespace YOBA {
 					if (strncmp(VERSION_STRING, reinterpret_cast<char*>(buffer), 6) == 0) {
 						ESP_LOGI(_logTag, "chip version: %s", buffer);
 						
-						return true;
+						return SX1262Error::none;
 					} else {
 						ESP_LOGE(_logTag, "failed to validate chip: version mismatch, attempt is %d, value is %s", i, buffer);
 						
@@ -143,7 +153,7 @@ namespace YOBA {
 				
 				ESP_LOGE(_logTag, "failed to validate chip: maximum attempts exceeded");
 				
-				return false;
+				return SX1262Error::invalidChip;
 			}
 			
 			/*!
@@ -153,7 +163,7 @@ namespace YOBA {
 			  \param freqMax Frequency band upper bound.
 			  \returns \ref status_codes
 			*/
-			virtual bool calibrateImageRejection(uint16_t freqMin, uint16_t freqMax) {
+			virtual SX1262Error calibrateImageRejection(uint16_t freqMin, uint16_t freqMax) {
 				// calculate the calibration coefficients and calibrate image
 				uint8_t data[3] = {
 					CMD_CALIBRATE_IMAGE,
@@ -174,7 +184,7 @@ namespace YOBA {
 			  \param frequencyMHz Frequency to perform the calibration for.
 			  \returns \ref status_codes
 			*/
-			virtual bool calibrateImage(uint16_t frequencyMHz) {
+			virtual SX1262Error calibrateImage(uint16_t frequencyMHz) {
 				uint8_t data[3] = {
 					CMD_CALIBRATE_IMAGE,
 					0,
@@ -209,10 +219,11 @@ namespace YOBA {
 				return calibrateImageRejection(frequencyMHz - 4, frequencyMHz + 4);
 			}
 			
-			virtual bool setRFFrequency(uint16_t frequencyMHz) {
+			virtual SX1262Error setRFFrequency(uint16_t frequencyMHz) {
 				if (frequencyMHz < 120 || frequencyMHz > 960) {
 					ESP_LOGE(_logTag, "failed to set frequency: value %d is out of range [120; 960]");
-					return false;
+					
+					return SX1262Error::invalidArgument;
 				}
 				
 				// From SX1262 datasheet:
@@ -239,60 +250,30 @@ namespace YOBA {
 					static_cast<uint8_t>(regValue & 0xFF)
 				};
 				
-				if (!SPIWrite(data, 5)) {
-					ESP_LOGE(_logTag, "failed to set frequency to %d", frequencyMHz);
-					return false;
-				}
-				
-				return true;
+				return SPIWrite(data, 5);
 			}
 			
-			virtual bool setStandby(uint8_t value = STANDBY_RC) {
-				if (!SPIWriteCommandAndUint8(CMD_SET_STANDBY, value)) {
-					ESP_LOGE(_logTag, "failed to enter standby mode");
-					return false;
-				}
-				
-				return true;
+			virtual SX1262Error setStandby(uint8_t value = STANDBY_RC) {
+				return SPIWriteCommandAndUint8(CMD_SET_STANDBY, value);
 			}
 			
-			virtual bool setSymbNumTimeout(uint8_t value) {
-				if (!SPIWriteCommandAndUint8(CMD_SET_LORA_SYMB_NUM_TIMEOUT, value)) {
-					ESP_LOGE(_logTag, "failed to set symb num timeout");
-					return false;
-				}
-				
-				return true;
+			virtual SX1262Error setSymbNumTimeout(uint8_t value) {
+				return SPIWriteCommandAndUint8(CMD_SET_LORA_SYMB_NUM_TIMEOUT, value);
 			}
 			
-			virtual bool setRX(uint32_t timeoutUs = 0) {
-				if (!setRXOrTX(CMD_SET_RX, timeoutUs)) {
-					ESP_LOGE(_logTag, "failed to enter RX mode");
-					return false;
-				}
-				
-				return true;
+			virtual SX1262Error setRX(uint32_t timeoutUs = 0) {
+				return setRXOrTX(CMD_SET_RX, timeoutUs);
 			}
 			
-			virtual bool setTX(uint32_t timeoutUs = 0) {
-				if (!setRXOrTX(CMD_SET_TX, timeoutUs)) {
-					ESP_LOGE(_logTag, "failed to enter TX mode");
-					return false;
-				}
-				
-				return true;
+			virtual SX1262Error setTX(uint32_t timeoutUs = 0) {
+				return setRXOrTX(CMD_SET_TX, timeoutUs);
 			}
 			
-			virtual bool setRXTXFallbackMode(uint8_t value = RX_TX_FALLBACK_MODE_STDBY_RC) {
-				if (!SPIWriteCommandAndUint8(CMD_SET_RX_TX_FALLBACK_MODE, value)) {
-					ESP_LOGE(_logTag, "failed to configure RX/TX fallback mode");
-					return false;
-				}
-				
-				return true;
+			virtual SX1262Error setRXTXFallbackMode(uint8_t value = RX_TX_FALLBACK_MODE_STDBY_RC) {
+				return SPIWriteCommandAndUint8(CMD_SET_RX_TX_FALLBACK_MODE, value);
 			}
 			
-			virtual bool setCADParams(uint8_t spreadingFactor) {
+			virtual SX1262Error setCADParams(uint8_t spreadingFactor) {
 				const uint8_t data[] = {
 					CMD_SET_CAD_PARAMS,
 					CAD_ON_8_SYMB,
@@ -304,97 +285,62 @@ namespace YOBA {
 					0x00
 				};
 				
-				if (!SPIWrite(data, 8)) {
-					ESP_LOGE(_logTag, "failed to set CAD params");
-					return false;
-				}
-				
-				return true;
+				return SPIWrite(data, 8);
 			}
 			
-			virtual bool setBufferBaseAddress(uint8_t rxAddress = 0x00, uint8_t txAddress = 0x00) {
+			virtual SX1262Error setBufferBaseAddress(uint8_t rxAddress = 0x00, uint8_t txAddress = 0x00) {
 				const uint8_t data[] = {
 					CMD_SET_BUFFER_BASE_ADDRESS,
 					rxAddress,
 					txAddress
 				};
 				
-				if (!SPIWrite(data, 3)) {
-					ESP_LOGE(_logTag, "failed to set buffer base address");
-					return false;
-				}
-				
-				return true;
+				return SPIWrite(data, 3);
 			}
 			
-			virtual bool getStatus(uint8_t& status) {
-				if (!SPIReadCommand(CMD_GET_STATUS, &status, 1)) {
-					ESP_LOGE(_logTag, "failed to get status");
-					
-					return false;
-				}
-				
-				return true;
+			virtual SX1262Error getStatus(uint8_t& status) {
+				return SPIReadCommand(CMD_GET_STATUS, &status, 1);
 			}
 			
-			virtual bool getPacketType(uint8_t& packetType) {
-				if (!SPIReadCommand(CMD_GET_PACKET_TYPE, &packetType, 1)) {
-					ESP_LOGE(_logTag, "failed to get packet type");
-					
-					return false;
-				}
-				
-				return true;
+			virtual SX1262Error getPacketType(uint8_t& packetType) {
+				return SPIReadCommand(CMD_GET_PACKET_TYPE, &packetType, 1);
 			}
 			
-			virtual bool setPacketType(uint8_t packetType) {
-				if (!SPIWriteCommandAndUint8(CMD_SET_PACKET_TYPE, packetType)) {
-					ESP_LOGE(_logTag, "failed to set packet type");
-					return false;
-				}
-				
-				return true;
+			virtual SX1262Error setPacketType(uint8_t packetType) {
+				return SPIWriteCommandAndUint8(CMD_SET_PACKET_TYPE, packetType);
 			}
 			
-			virtual bool setRegulatorMode(uint8_t mode) {
-				if (!SPIWriteCommandAndUint8(CMD_SET_REGULATOR_MODE, mode)) {
-					ESP_LOGE(_logTag, "failed to set regulator mode");
-					return false;
-				}
-				
-				return true;
+			virtual SX1262Error setRegulatorMode(uint8_t mode) {
+				return SPIWriteCommandAndUint8(CMD_SET_REGULATOR_MODE, mode);
 			}
 			
-			virtual bool getIRQStatus(uint16_t& status) {
+			virtual SX1262Error getIRQStatus(uint16_t& status) {
 				status = 0;
 				
-				if (!SPIReadCommand(CMD_GET_IRQ_STATUS, reinterpret_cast<uint8_t*>(&status), 2)) {
+				const auto error = SPIReadCommand(CMD_GET_IRQ_STATUS, reinterpret_cast<uint8_t*>(&status), 2);
+				
+				if (error != SX1262Error::none) {
 					ESP_LOGE(_logTag, "failed to get IRQ status");
 					
-					return false;
+					return error;
 				}
 				
 				status = ((status & 0xFF) << 8) | ((status >> 8) & 0xFF);
 				
-				return true;
+				return SX1262Error::none;
 			}
 			
-			virtual bool clearIRQStatus(uint16_t status = IRQ_ALL) {
+			virtual SX1262Error clearIRQStatus(uint16_t status = IRQ_ALL) {
 				const uint8_t data[] = {
 					CMD_CLEAR_IRQ_STATUS,
 					(uint8_t) ((status >> 8) & 0xFF),
 					(uint8_t) (status & 0xFF)
 				};
 				
-				if (!SPIWrite(data, 3)) {
-					ESP_LOGE(_logTag, "failed to clear IRQ status");
-					return false;
-				}
-				
-				return true;
+				return SPIWrite(data, 3);
 			}
 			
-			virtual bool setDIOIRQParams(uint16_t irqMask = IRQ_NONE, uint16_t dio1Mask = IRQ_NONE, uint16_t dio2Mask = IRQ_NONE, uint16_t dio3Mask = IRQ_NONE) {
+			virtual SX1262Error setDIOIRQParams(uint16_t irqMask = IRQ_NONE, uint16_t dio1Mask = IRQ_NONE, uint16_t dio2Mask = IRQ_NONE, uint16_t dio3Mask = IRQ_NONE) {
 				const uint8_t data[] = {
 					CMD_SET_DIO_IRQ_PARAMS,
 					
@@ -411,15 +357,10 @@ namespace YOBA {
 					static_cast<uint8_t>(dio3Mask & 0xFF)
 				};
 				
-				if (!SPIWrite(data, 9)) {
-					ESP_LOGE(_logTag, "failed to set DIO IRQ params");
-					return false;
-				}
-				
-				return true;
+				return SPIWrite(data, 9);
 			}
 			
-			virtual bool calibrate(uint8_t value) {
+			virtual SX1262Error calibrate(uint8_t value) {
 				return SPIWriteCommandAndUint8(CMD_CALIBRATE, value);
 			}
 			
@@ -431,21 +372,18 @@ namespace YOBA {
 			 
 			 \returns \ref status_codes
 		   */
-			virtual bool setSyncWord(uint8_t syncWord, uint8_t controlBits = 0x44) {
-				if (!checkForLoRaPacketType())
-					return false;
+			virtual SX1262Error setSyncWord(uint8_t syncWord, uint8_t controlBits = 0x44) {
+				const auto error = checkForLoRaPacketType();
+				
+				if (error != SX1262Error::none)
+					return error;
 				
 				uint8_t data[] {
 					static_cast<uint8_t>((syncWord & 0xF0) | ((controlBits & 0xF0) >> 4)),
 					static_cast<uint8_t>(((syncWord & 0x0F) << 4) | (controlBits & 0x0F))
 				};
-				
-				if (!SPIWriteRegister(REG_LORA_SYNC_WORD_MSB, data, 2)) {
-					ESP_LOGE(_logTag, "failed to set sync word");
-					return false;
-				}
-				
-				return true;
+			
+				return SPIWriteRegister(REG_LORA_SYNC_WORD_MSB, data, 2);
 			}
 			
 			/*!
@@ -453,11 +391,11 @@ namespace YOBA {
 			 \param currentLimit current protection limit to be set in mA. Allowed values range from 0 to 140.
 			 \returns \ref status_codes
 		   */
-			virtual bool setCurrentLimit(float currentLimit) {
+			virtual SX1262Error setCurrentLimit(float currentLimit) {
 				// check allowed range
 				if (currentLimit < 0 || currentLimit > 140) {
 					ESP_LOGE(_logTag, "failed to set current limit: value %f is out of range [0; 140]", currentLimit);
-					return false;
+					return SX1262Error::invalidArgument;
 				}
 				
 				// calculate raw value
@@ -470,11 +408,11 @@ namespace YOBA {
 			  \brief Set DIO2 to function as RF switch (default in Semtech example designs).
 			  \returns \ref status_codes
 			*/
-			virtual bool setDio2AsRfSwitch(bool enable) {
+			virtual SX1262Error setDio2AsRfSwitch(bool enable) {
 				return SPIWriteCommandAndUint8(CMD_SET_DIO2_AS_RF_SWITCH_CTRL, enable ? DIO2_AS_RF_SWITCH : DIO2_AS_IRQ);
 			}
 			
-			virtual bool setModulationParams(
+			virtual SX1262Error setModulationParams(
 				uint8_t spreadingFactor,
 				uint8_t bandwidth,
 				uint8_t codingRate,
@@ -493,14 +431,16 @@ namespace YOBA {
 				return SPIWrite(data, 5);
 			}
 			
-			virtual bool setTXClampConfig(bool enable) {
+			virtual SX1262Error setTXClampConfig(bool enable) {
 				// fixes overly eager PA clamping
 				// see SX1262/SX1268 datasheet, chapter 15 Known Limitations, section 15.2 for details
 				
 				uint8_t clampConfig = 0;
 				
-				if (!SPIReadRegister(REG_TX_CLAMP_CONFIG, &clampConfig, 1))
-					return false;
+				const auto error = SPIReadRegister(REG_TX_CLAMP_CONFIG, &clampConfig, 1);
+				
+				if (error != SX1262Error::none)
+					return error;
 				
 				// apply or undo workaround
 				if (enable) {
@@ -513,40 +453,48 @@ namespace YOBA {
 				return SPIWriteRegister(REG_TX_CLAMP_CONFIG, &clampConfig, 1);
 			}
 			
-			virtual bool setOutputPower(int8_t powerDBm) {
+			virtual SX1262Error setOutputPower(int8_t powerDBm) {
 				// get current OCP configuration
 				uint8_t ocp = 0;
 				
-				if (!SPIReadRegister(REG_OCP_CONFIGURATION, &ocp, 1)) {
+				auto error = SPIReadRegister(REG_OCP_CONFIGURATION, &ocp, 1);
+				
+				if (error != SX1262Error::none) {
 					ESP_LOGE(_logTag, "set output power failed: unable to receive OCP configuration");
-					return false;
+					return error;
 				}
 				
 				// set PA config
-				if (!setPAConfig()) {
+				error = setPAConfig();
+				
+				if (error != SX1262Error::none) {
 					ESP_LOGE(_logTag, "set output power failed: unable to set PA config");
-					return false;
+					return error;
 				}
 				
 				// set output power with default 200us ramp
-				if (!setTXParams(powerDBm, PA_RAMP_200U)) {
+				error = setTXParams(powerDBm, PA_RAMP_200U);
+				
+				if (error != SX1262Error::none) {
 					ESP_LOGE(_logTag, "set output power failed: unable to set TX params");
-					return false;
+					return error;
 				}
 				
 				// restore OCP configuration
 				return SPIWriteRegister(REG_OCP_CONFIGURATION, &ocp, 1);
 			}
 			
-			virtual bool setPacketParams(
+			virtual SX1262Error setPacketParams(
 				uint16_t preambleLength,
 				uint8_t headerType,
 				uint8_t length,
 				uint8_t crcType,
 				uint8_t invertIQ
 			) {
-				if (!fixInvertedIQ(invertIQ))
-					return false;
+				const auto error = fixInvertedIQ(invertIQ);
+				
+				if (error != SX1262Error::none)
+					return error;
 				
 				const uint8_t data[7] = {
 					CMD_SET_PACKET_PARAMS,
@@ -561,7 +509,7 @@ namespace YOBA {
 				return SPIWrite(data, 7);
 			}
 			
-			bool writeBuffer(const uint8_t* data, uint8_t length, uint8_t offset = 0x00) {
+			SX1262Error writeBuffer(const uint8_t* data, uint8_t length, uint8_t offset = 0x00) {
 				_SPIBuffer[0] = CMD_WRITE_BUFFER;
 				_SPIBuffer[1] = offset;
 				
@@ -570,9 +518,9 @@ namespace YOBA {
 				return writeSPIBuffer(2 + length);
 			}
 			
-			bool readBuffer(uint8_t* data, uint8_t length, uint8_t offset) {
-				if (!waitForBusyPin())
-					return false;
+			SX1262Error readBuffer(uint8_t* data, uint8_t length, uint8_t offset) {
+				if (waitForBusyPin() == SX1262Error::timeout)
+					return SX1262Error::timeout;
 					
 				_SPIBuffer[0] = CMD_READ_BUFFER; // W: command | R: status
 				_SPIBuffer[1] = offset;          // W: offset  | R: status
@@ -584,66 +532,76 @@ namespace YOBA {
 				t.rx_buffer = _SPIBuffer;
 				t.length = 8 * (3 + length);
 				
-				const auto state = errorCheck(spi_device_transmit(_SPIDevice, &t));
+				const auto state = checkESPError(spi_device_transmit(_SPIDevice, &t));
 				
 				if (state) {
 					std::memcpy(data, _SPIBuffer + 3, length);
-				}
-//
+					
+					//
 //				for (int i = 0; i < 3 + length; ++i) {
 //					ESP_LOGI(_logTag, "readBuffer buffer[%d]: %d", i, _SPIBuffer[i]);
 //				}
+					return SX1262Error::none;
+				}
 				
-				return state;
+				return SX1262Error::SPI;
 			}
 			
-			bool getPacketStatus(uint32_t& status) {
+			SX1262Error getPacketStatus(uint32_t& status) {
 				uint8_t data[3] = {0, 0, 0};
 				
-				if (!SPIReadCommand(CMD_GET_PACKET_STATUS, data, 3))
-					return false;
+				const auto error = SPIReadCommand(CMD_GET_PACKET_STATUS, data, 3);
+				
+				if (error != SX1262Error::none)
+					return error;
 				
 				status = ((((uint32_t)data[0]) << 16) | (((uint32_t)data[1]) << 8) | (uint32_t)data[2]);
 				
-				return true;
+				return SX1262Error::none;
 			}
 			
-			bool getRSSI(float& rssi) {
+			SX1262Error getRSSI(float& rssi) {
 				uint32_t packetStatus = 0;
 				
-				if (!getPacketStatus(packetStatus))
-					return false;
+				const auto error = getPacketStatus(packetStatus);
+				
+				if (error != SX1262Error::none)
+					return error;
 				
 				rssi = getRSSIFromPacketStatus(packetStatus);
 				
-				return true;
+				return SX1262Error::none;
 			}
 
 			// get instantaneous RSSI value
-			bool getRSSIInst(float& rssi) {
+			SX1262Error getRSSIInst(float& rssi) {
 				uint8_t rssiRaw = 0;
 				
-				if (!SPIReadCommand(CMD_GET_RSSI_INST, &rssiRaw, 1))
-					return false;
+				const auto error = SPIReadCommand(CMD_GET_RSSI_INST, &rssiRaw, 1);
+				
+				if (error != SX1262Error::none)
+					return error;
 				
 				rssi = ((float) rssiRaw / (-2.0f));
 				
-				return true;
+				return SX1262Error::none;
 			}
 			
-			bool getSNR(float& snr) {
+			SX1262Error getSNR(float& snr) {
 				uint32_t packetStatus = 0;
 				
-				if (!getPacketStatus(packetStatus))
-					return false;
+				const auto error = getPacketStatus(packetStatus);
+				
+				if (error != SX1262Error::none)
+					return error;
 				
 				snr = getSNRFromPacketStatus(packetStatus);
 				
-				return true;
+				return SX1262Error::none;
 			}
 			
 		protected:
-			bool errorCheck(esp_err_t error) {
+			bool checkESPError(esp_err_t error) {
 				if (error != ESP_OK) {
 					ESP_ERROR_CHECK_WITHOUT_ABORT(error);
 					return false;
@@ -652,44 +610,40 @@ namespace YOBA {
 				return true;
 			}
 			
-			bool checkForLoRaPacketType() {
+			SX1262Error checkForLoRaPacketType() {
 				uint8_t packetType = 0;
 				
-				if (!getPacketType(packetType))
-					return false;
+				const auto error = getPacketType(packetType);
+				
+				if (error != SX1262Error::none)
+					return error;
 				
 				if (packetType != PACKET_TYPE_LORA) {
 					ESP_LOGE(_logTag, "failed to set coding rate: packet type %d is not LoRa", packetType);
-					return false;
+					return SX1262Error::invalidPacketType;
 				}
 				
-				return true;
+				return SX1262Error::none;
 			}
 			
 			void delayMs(uint32_t ms) {
 				vTaskDelay(pdMS_TO_TICKS(std::max<uint32_t>(ms, portTICK_PERIOD_MS)));
 			}
 			
-			bool waitForBusyPin(uint32_t timeoutMs = 1'000) {
-//				while (getBusyPinLevel()) {
-//					delayMs(10);
-//				}
-//
-//				return true;
-
+			SX1262Error waitForBusyPin(uint32_t timeoutMs = 1'000) {
 				if (!getBusyPinLevel() || xSemaphoreTake(_busyPinSemaphore, pdMS_TO_TICKS(timeoutMs)) == pdTRUE)
-					return true;
+					return SX1262Error::none;
 
-				ESP_LOGE(_logTag, "failed to wait for busy pin : timeout reached");
+				ESP_LOGE(_logTag, "failed to wait for busy pin: timeout reached");
 
-				return false;
+				return SX1262Error::timeout;
 			}
 			
 			// -------------------------------- Reading --------------------------------
 			
-			bool SPIReadCommand(uint8_t command, uint8_t* data, uint8_t length) {
-				if (!waitForBusyPin())
-					return false;
+			SX1262Error SPIReadCommand(uint8_t command, uint8_t* data, uint8_t length) {
+				if (waitForBusyPin() == SX1262Error::timeout)
+					return SX1262Error::timeout;
 				
 				_SPIBuffer[0] = command; // W: command | R: status
 				_SPIBuffer[1] = 0x00;    // W: -       | R: status
@@ -700,22 +654,24 @@ namespace YOBA {
 				t.rx_buffer = _SPIBuffer;
 				t.length = 8 * (2 + length);
 				
-				const auto state = errorCheck(spi_device_transmit(_SPIDevice, &t));
+				const auto state = checkESPError(spi_device_transmit(_SPIDevice, &t));
 				
 				if (state) {
-					std::memcpy(data, _SPIBuffer + 2, length);
-				}
-				
-//				for (int i = 0; i < 3; ++i) {
+					//				for (int i = 0; i < 3; ++i) {
 //					ESP_LOGI(_logTag, "SPIReadCommand buffer[%d]: %d", i, _SPIBuffer[i]);
 //				}
+					
+					std::memcpy(data, _SPIBuffer + 2, length);
+					
+					return SX1262Error::none;
+				}
 				
-				return state;
+				return SX1262Error::SPI;
 			}
 			
-			bool SPIReadRegister(const uint16_t reg, uint8_t* data, const size_t length) {
-				if (!waitForBusyPin())
-					return false;
+			SX1262Error SPIReadRegister(const uint16_t reg, uint8_t* data, const size_t length) {
+				if (waitForBusyPin() == SX1262Error::timeout)
+					return SX1262Error::timeout;
 				
 				_SPIBuffer[0] = CMD_READ_REGISTER; // W: command  | R: status
 				_SPIBuffer[1] = (reg >> 8) & 0xFF; // W: Reg MSB  | R: status
@@ -728,35 +684,36 @@ namespace YOBA {
 				t.rx_buffer = _SPIBuffer;
 				t.length = 8 * (4 + length);
 				
-				const auto state = errorCheck(spi_device_transmit(_SPIDevice, &t));
+				const auto state = checkESPError(spi_device_transmit(_SPIDevice, &t));
 				
 				if (state) {
 					std::memcpy(data, _SPIBuffer + 4, length);
-				}
-				
-//				for (int i = 0; i < 4 + length; ++i) {
+					
+					//				for (int i = 0; i < 4 + length; ++i) {
 //					ESP_LOGI(_logTag, "SPIReadRegister buffer[%d]: %d", i, _SPIBuffer[i]);
 //				}
+					return SX1262Error::none;
+				}
 				
-				return state;
+				return SX1262Error::SPI;
 			}
 			
 			// -------------------------------- Writing --------------------------------
 			
-			bool SPIWrite(const uint8_t* data, uint16_t length) {
+			SX1262Error SPIWrite(const uint8_t* data, uint16_t length) {
 				std::memcpy(_SPIBuffer, data, length);
 				
 				return writeSPIBuffer(length);
 			}
 			
-			bool SPIWriteCommandAndUint8(uint8_t command, uint8_t data) {
+			SX1262Error SPIWriteCommandAndUint8(uint8_t command, uint8_t data) {
 				_SPIBuffer[0] = command;
 				_SPIBuffer[1] = data;
 				
 				return writeSPIBuffer(2);
 			}
 			
-			bool SPIWriteRegister(const uint16_t reg, const uint8_t* data, size_t length) {
+			SX1262Error SPIWriteRegister(const uint16_t reg, const uint8_t* data, size_t length) {
 				_SPIBuffer[0] = CMD_WRITE_REGISTER;
 				_SPIBuffer[1] = (reg >> 8) & 0xFF; // Reg MSB
 				_SPIBuffer[2] = reg & 0xFF;        // Reg LSB
@@ -803,18 +760,18 @@ namespace YOBA {
 			
 			// -------------------------------- Auxiliary --------------------------------
 			
-			bool writeSPIBuffer(uint16_t totalLength) {
-				if (!waitForBusyPin())
-					return false;
+			SX1262Error writeSPIBuffer(uint16_t totalLength) {
+				if (waitForBusyPin() == SX1262Error::timeout)
+					return SX1262Error::timeout;
 				
 				spi_transaction_t t {};
 				t.tx_buffer = _SPIBuffer;
 				t.length = 8 * totalLength;
 				
-				return errorCheck(spi_device_transmit(_SPIDevice, &t));
+				return checkESPError(spi_device_transmit(_SPIDevice, &t)) ? SX1262Error::none : SX1262Error::SPI;
 			}
 			
-			bool setRXOrTX(uint8_t command, uint32_t timeoutUs) {
+			SX1262Error setRXOrTX(uint8_t command, uint32_t timeoutUs) {
 				// From datasheet: timeoutUs = timeoutValue * 15.625 µs
 				const uint32_t timeout = timeoutUs / 15.625f;
 				
@@ -828,15 +785,17 @@ namespace YOBA {
 				return SPIWrite(data, 4);
 			}
 			
-			bool fixInvertedIQ(uint8_t iqConfig) {
+			SX1262Error fixInvertedIQ(uint8_t iqConfig) {
 				// fixes IQ configuration for inverted IQ
 				// see SX1262/SX1268 datasheet, chapter 15 Known Limitations, section 15.4 for details
 				
 				// read current IQ configuration
 				uint8_t iqConfigCurrent = 0;
 				
-				if (!SPIReadRegister(REG_IQ_CONFIG, &iqConfigCurrent, 1))
-					return false;
+				const auto error = SPIReadRegister(REG_IQ_CONFIG, &iqConfigCurrent, 1);
+				
+				if (error != SX1262Error::none)
+					return error;
 				
 				// set correct IQ configuration
 				if (iqConfig == LORA_IQ_INVERTED) {
@@ -861,7 +820,7 @@ namespace YOBA {
 			 \param paLut paLut PA lookup table raw value.
 			 \returns \ref status_codes
 		   */
-			bool setPAConfig(uint8_t paDutyCycle = 0x04, uint8_t deviceSel = PA_CONFIG_SX1262, uint8_t hpMax = PA_CONFIG_HP_MAX, uint8_t paLut = PA_CONFIG_PA_LUT) {
+			SX1262Error setPAConfig(uint8_t paDutyCycle = 0x04, uint8_t deviceSel = PA_CONFIG_SX1262, uint8_t hpMax = PA_CONFIG_HP_MAX, uint8_t paLut = PA_CONFIG_PA_LUT) {
 				const uint8_t data[5] = {
 					CMD_SET_PA_CONFIG,
 					paDutyCycle,
@@ -873,10 +832,10 @@ namespace YOBA {
 				return SPIWrite(data, 5);
 			}
 			
-			bool setTXParams(int8_t power, uint8_t rampTime) {
+			SX1262Error setTXParams(int8_t power, uint8_t rampTime) {
 				if (power < -9 || power > 22) {
 					ESP_LOGE(_logTag, "set output power failed: value %d is out of range [-9; 22]", power);
-					return false;
+					return SX1262Error::invalidArgument;
 				}
 				
 				const uint8_t data[] = {
@@ -891,7 +850,7 @@ namespace YOBA {
 			float getRSSIFromPacketStatus(uint32_t packetStatus) {
 				uint8_t rssiPkt = packetStatus & 0xFF;
 				
-				return  1.0 * rssiPkt / 2.0;
+				return 1.0 * rssiPkt / 2.0;
 			}
 			
 			float getSNRFromPacketStatus(uint32_t packetStatus) {
