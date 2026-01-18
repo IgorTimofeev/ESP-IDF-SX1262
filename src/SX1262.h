@@ -850,7 +850,7 @@ namespace YOBA {
 			float getRSSIFromPacketStatus(uint32_t packetStatus) {
 				uint8_t rssiPkt = packetStatus & 0xFF;
 				
-				return 1.0 * rssiPkt / 2.0;
+				return -1.f * rssiPkt / 2.f;
 			}
 			
 			float getSNRFromPacketStatus(uint32_t packetStatus) {

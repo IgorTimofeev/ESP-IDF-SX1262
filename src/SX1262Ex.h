@@ -468,7 +468,7 @@ namespace YOBA {
 				error = waitForDIO1Semaphore(timeoutUs);
 				
 				if (error != SX1262Error::none) {
-					ESP_LOGE(_logTag, "failed to transmit: semaphore timeout reached");
+					ESP_LOGE(_logTag, "failed to transmit: dio1 timeout reached");
 					
 					finishTransmit();
 					
@@ -614,7 +614,7 @@ namespace YOBA {
 				error = waitForDIO1Semaphore(timeoutUs);
 				
 				if (error != SX1262Error::none) {
-					ESP_LOGE(_logTag, "failed to receive: semaphore timeout reached");
+					ESP_LOGE(_logTag, "failed to receive: dio1 timeout reached");
 					
 					finishReceive();
 					
