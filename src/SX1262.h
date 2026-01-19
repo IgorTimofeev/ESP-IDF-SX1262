@@ -65,12 +65,11 @@ namespace YOBA {
 				gpio_config_t g {};
 
 				// SS
-				g.pin_bit_mask = (1ULL << _SSPin);
+				g.pin_bit_mask = 1ULL << _SSPin;
 
 				// RST
-				if (_RSTPin != GPIO_NUM_NC) {
-					g.pin_bit_mask |= (1ULL << _RSTPin);
-				}
+				if (_RSTPin != GPIO_NUM_NC)
+					g.pin_bit_mask |= 1ULL << _RSTPin;
 
 				g.mode = GPIO_MODE_OUTPUT;
 				g.pull_up_en = GPIO_PULLUP_DISABLE;
@@ -85,7 +84,7 @@ namespace YOBA {
 
 				// Busy
 				g = {};
-				g.pin_bit_mask = (1ULL << static_cast<uint16_t>(_busyPin));
+				g.pin_bit_mask = 1ULL << static_cast<uint16_t>(_busyPin);
 				g.mode = GPIO_MODE_INPUT;
 				g.pull_up_en = GPIO_PULLUP_ENABLE;
 				g.pull_down_en = GPIO_PULLDOWN_DISABLE;
@@ -94,7 +93,7 @@ namespace YOBA {
 
 				// DIO1
 				g = {};
-				g.pin_bit_mask = (1ULL << static_cast<uint16_t>(_DIO1Pin));
+				g.pin_bit_mask = 1ULL << static_cast<uint16_t>(_DIO1Pin);
 				g.mode = GPIO_MODE_INPUT;
 				g.pull_up_en = GPIO_PULLUP_ENABLE;
 				g.pull_down_en = GPIO_PULLDOWN_DISABLE;
@@ -169,7 +168,9 @@ namespace YOBA {
 					return error;
 
 				// Wait for calibration completion end. Normally this should take 3.5 ms
-				waitForBusyPin(1'000);
+				error = waitForBusyPin(1'000);
+				if (error != SX1262Error::none)
+					return error;
 
 				error = setRegulatorMode(useLDORegulator ? REGULATOR_LDO : REGULATOR_DC_DC);
 				if (error != SX1262Error::none)
