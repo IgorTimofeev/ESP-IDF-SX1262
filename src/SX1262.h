@@ -787,17 +787,6 @@ namespace YOBA {
 				return updatePacketParams();
 			}
 
-			SX1262Error finishTransmit() {
-//				if (!setStandby())
-//					return false;
-
-				const auto error = clearIRQStatus();
-				if (error != SX1262Error::none)
-					return error;
-
-				return SX1262Error::none;
-			}
-
 			SX1262Error waitForDIO1Semaphore(const uint32_t timeoutUs) const {
 				return
 					// Already in high
@@ -877,18 +866,12 @@ namespace YOBA {
 				if (error != SX1262Error::none) {
 					ESP_LOGE(_logTag, "failed to transmit: dio1 timeout reached");
 
-					finishTransmit();
-
 					return SX1262Error::timeout;
 				}
 
 				uint16_t IRQStatus = 0;
 
 				error = getIRQStatus(IRQStatus);
-				if (error != SX1262Error::none)
-					return error;
-
-				error = finishTransmit();
 				if (error != SX1262Error::none)
 					return error;
 
@@ -961,18 +944,13 @@ namespace YOBA {
 			}
 
 			SX1262Error finishReceive() {
-//				if (!setStandby())
-//					return false;
-
 				// try to fix timeout error in implicit header mode
 				// check for modem type and header mode is done in fixImplicitTimeout()
 				const auto error = fixImplicitTimeout();
-
 				if (error != SX1262Error::none)
 					return error;
 
-				// clear interrupt flags
-				return clearIRQStatus();
+				return error;
 			}
 
 			SX1262Error receive(uint8_t* data, uint8_t& length, uint32_t timeoutUs = 0) {
@@ -1079,24 +1057,25 @@ namespace YOBA {
 			static void errorToString(const SX1262Error error, char* str, const size_t length) {
 				switch (error) {
 					case SX1262Error::none:
+						std::strncpy(str, "none", length);
 						break;
 					case SX1262Error::invalidChip:
-						snprintf(str, length, "invalid chip");
+						std::strncpy(str, "invalid chip", length);
 						break;
 					case SX1262Error::SPI:
-						snprintf(str, length, "SPI");
+						std::strncpy(str, "SPI", length);
 						break;
 					case SX1262Error::timeout:
-						snprintf(str, length, "timeout");
+						std::strncpy(str, "timeout", length);
 						break;
 					case SX1262Error::invalidArgument:
-						snprintf(str, length, "invalid argument");
+						std::strncpy(str, "invalid argument", length);
 						break;
 					case SX1262Error::invalidPacketType:
-						snprintf(str, length, "invalid packet type");
+						std::strncpy(str, "invalid packet type", length);
 						break;
 					case SX1262Error::invalidChecksum:
-						snprintf(str, length, "invalid checksum");
+						std::strncpy(str, "invalid checksum", length);
 						break;
 				}
 			}
