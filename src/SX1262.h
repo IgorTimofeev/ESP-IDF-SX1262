@@ -1076,6 +1076,31 @@ namespace YOBA {
 				return SPIWriteRegister(REG_TX_MODULATION, &txModulation, 1);
 			}
 
+			static void errorToString(const SX1262Error error, char* str, const size_t length) {
+				switch (error) {
+					case SX1262Error::none:
+						break;
+					case SX1262Error::invalidChip:
+						snprintf(str, length, "invalid chip");
+						break;
+					case SX1262Error::SPI:
+						snprintf(str, length, "SPI");
+						break;
+					case SX1262Error::timeout:
+						snprintf(str, length, "timeout");
+						break;
+					case SX1262Error::invalidArgument:
+						snprintf(str, length, "invalid argument");
+						break;
+					case SX1262Error::invalidPacketType:
+						snprintf(str, length, "invalid packet type");
+						break;
+					case SX1262Error::invalidChecksum:
+						snprintf(str, length, "invalid checksum");
+						break;
+				}
+			}
+
 		protected:
 			static bool checkESPError(const esp_err_t error) {
 				if (error != ESP_OK) {
