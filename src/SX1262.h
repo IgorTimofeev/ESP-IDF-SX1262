@@ -1204,7 +1204,7 @@ namespace YOBA {
 			}
 
 		private:
-			constexpr static const char* _logTag = "SX1262";
+			constexpr static auto _logTag = "SX1262";
 
 			gpio_num_t _SSPin = GPIO_NUM_NC;
 			gpio_num_t _busyPin = GPIO_NUM_NC;
