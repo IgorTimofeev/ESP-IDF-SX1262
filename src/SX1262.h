@@ -45,7 +45,7 @@ namespace YOBA {
 				const gpio_num_t busyPin,
 				const gpio_num_t DIO1Pin,
 
-				const uint16_t frequencyMHz,
+				const uint32_t frequencyHz,
 				const uint8_t bandwidth,
 				const uint8_t spreadingFactor,
 				const uint8_t codingRate,
@@ -215,7 +215,7 @@ namespace YOBA {
 				if (error != SX1262Error::none)
 					return error;
 
-				error = setRFFrequency(frequencyMHz);
+				error = setRFFrequency(frequencyHz);
 				if (error != SX1262Error::none)
 					return error;
 
@@ -283,16 +283,16 @@ namespace YOBA {
 			/*!
 			  \brief Perform image rejection calibration for the specified frequency band.
 			  WARNING: Use at your own risk! Setting incorrect values may lead to decreased performance
-			  \param freqMin Frequency band lower bound.
-			  \param freqMax Frequency band upper bound.
+			  \param freqMinHz Frequency band lower bound.
+			  \param freqMaxHz Frequency band upper bound.
 			  \returns \ref status_codes
 			*/
-			SX1262Error calibrateImageRejection(const uint16_t freqMin, const uint16_t freqMax) {
+			SX1262Error calibrateImageRejection(const uint16_t freqMinHz, const uint16_t freqMaxHz) {
 				// calculate the calibration coefficients and calibrate image
 				uint8_t data[3] = {
 					CMD_CALIBRATE_IMAGE,
-					static_cast<uint8_t>(std::floor((static_cast<float>(freqMin) - 1.0f) / 4.0f)),
-					static_cast<uint8_t>(std::ceil((static_cast<float>(freqMax) + 1.0f) / 4.0f))
+					static_cast<uint8_t>(std::floor((static_cast<float>(freqMinHz / 1'000) - 1.0f) / 4.0f)),
+					static_cast<uint8_t>(std::ceil((static_cast<float>(freqMaxHz / 1'000) + 1.0f) / 4.0f))
 				};
 
 				data[0] = (data[0] % 2) ? data[0] : data[0] - 1;
@@ -305,10 +305,10 @@ namespace YOBA {
 			  \brief Perform image rejection calibration for the specified frequency.
 			  Will try to use Semtech-defined presets first, and if none of them matches,
 			  custom iamge calibration will be attempted using calibrateImageRejection.
-			  \param frequencyMHz Frequency to perform the calibration for.
+			  \param frequencyHz Frequency to perform the calibration for.
 			  \returns \ref status_codes
 			*/
-			SX1262Error calibrateImage(const uint16_t frequencyMHz) {
+			SX1262Error calibrateImage(const uint32_t frequencyHz) {
 				uint8_t data[3] = {
 					CMD_CALIBRATE_IMAGE,
 					0,
@@ -316,19 +316,23 @@ namespace YOBA {
 				};
 
 				// try to match the frequency ranges
-				if ((frequencyMHz >= 902) && (frequencyMHz <= 928)) {
+				if (frequencyHz >= 902'000'000 && frequencyHz <= 928'000'000) {
 					data[1] = CAL_IMG_902_MHZ_1;
 					data[2] = CAL_IMG_902_MHZ_2;
-				} else if ((frequencyMHz >= 863) && (frequencyMHz <= 870)) {
+				}
+				else if (frequencyHz >= 863'000'000 && frequencyHz <= 870'000'000) {
 					data[1] = CAL_IMG_863_MHZ_1;
 					data[2] = CAL_IMG_863_MHZ_2;
-				} else if ((frequencyMHz >= 779) && (frequencyMHz <= 787)) {
+				}
+				else if (frequencyHz >= 779'000'000 && frequencyHz <= 787'000'000) {
 					data[1] = CAL_IMG_779_MHZ_1;
 					data[2] = CAL_IMG_779_MHZ_2;
-				} else if ((frequencyMHz >= 470) && (frequencyMHz <= 510)) {
+				}
+				else if (frequencyHz >= 470'000'000 && frequencyHz <= 510'000'000) {
 					data[1] = CAL_IMG_470_MHZ_1;
 					data[2] = CAL_IMG_470_MHZ_2;
-				} else if ((frequencyMHz >= 430) && (frequencyMHz <= 440)) {
+				}
+				else if (frequencyHz >= 430'000'000 && frequencyHz <= 440'000'000) {
 					data[1] = CAL_IMG_430_MHZ_1;
 					data[2] = CAL_IMG_430_MHZ_2;
 				}
@@ -340,25 +344,25 @@ namespace YOBA {
 
 				// if nothing matched, try custom calibration - they may or may not work
 				ESP_LOGW(_logTag, "failed to match predefined frequency range, trying custom");
-				return calibrateImageRejection(frequencyMHz - 4, frequencyMHz + 4);
+				return calibrateImageRejection(frequencyHz - 4'000'000, frequencyHz + 4'000'000);
 			}
 
-			SX1262Error setRFFrequency(const uint16_t frequencyMHz) {
-				if (frequencyMHz < 120 || frequencyMHz > 960) {
+			SX1262Error setRFFrequency(const uint32_t frequencyHz) {
+				if (frequencyHz < 120'000'000 || frequencyHz > 960'000'000) {
 					ESP_LOGE(_logTag, "failed to set frequency: value %d is out of range [120; 960]");
 
 					return SX1262Error::invalidArgument;
 				}
 
 				// Check if we need to recalibrate image
-				if ((std::abs(static_cast<int32_t>(frequencyMHz) - static_cast<int32_t>(_frequencyMHz)) >= CAL_IMG_FREQ_TRIG_MHZ)) {
-					const auto error = calibrateImage(frequencyMHz);
+				if (std::abs(static_cast<int64_t>(frequencyHz) - static_cast<int64_t>(_frequencyHz)) >= static_cast<int64_t>(CAL_IMG_FREQ_TRIG_HZ)) {
+					const auto error = calibrateImage(frequencyHz);
 
 					if (error != SX1262Error::none)
 						return error;
 				}
 
-				_frequencyMHz = frequencyMHz;
+				_frequencyHz = frequencyHz;
 
 				// From SX1262 datasheet:
 				// frequencyHz = regValue * crystalFreqHz / divider
@@ -374,7 +378,7 @@ namespace YOBA {
 				// regValue = frequencyHz * divider / crystalFreqHz
 				// regValue = frequencyHz * 2^25 / 32'000'000 Hz
 
-				const auto regValue = static_cast<uint32_t>(static_cast<uint64_t>(frequencyMHz) * static_cast<uint64_t>(RF_DIVIDER) / static_cast<uint64_t>(RF_CRYSTAL_FREQUENCY_MHZ));
+				const auto regValue = static_cast<uint32_t>(static_cast<uint64_t>(frequencyHz) * static_cast<uint64_t>(RF_DIVIDER) / static_cast<uint64_t>(RF_CRYSTAL_FREQUENCY_HZ));
 
 				const uint8_t data[] = {
 					CMD_SET_RF_FREQUENCY,
@@ -395,7 +399,13 @@ namespace YOBA {
 				return SPIWriteCommandAndUint8(CMD_SET_LORA_SYMB_NUM_TIMEOUT, value);
 			}
 
-			SX1262Error setRX(const uint32_t timeoutUs = 0) {
+			// Allowed timeout values:
+			//
+			// | Value                       | Description |
+			// | RX_TIMEOUT_NONE (0)         | RX single mode |
+			// | RX_TIMEOUT_INF (0xFFFFFF)   | RX continuous mode |
+			// | others                      | RX with timeout |
+			SX1262Error setRX(const uint32_t timeoutUs = RX_TIMEOUT_NONE) {
 				return setRXOrTX(CMD_SET_RX, timeoutUs);
 			}
 
@@ -720,7 +730,7 @@ namespace YOBA {
 				if (error != SX1262Error::none)
 					return error;
 
-				rssi = (static_cast<float>(rssiRaw) / (-2.0f));
+				rssi = static_cast<float>(rssiRaw) / -2.0f;
 
 				return SX1262Error::none;
 			}
@@ -888,7 +898,7 @@ namespace YOBA {
 				// fixes timeout in implicit header mode
 				// see SX1262/SX1268 datasheet, chapter 15 Known Limitations, section 15.3 for details
 
-				//check if we're in implicit LoRa mode
+				// check if we're in implicit LoRa mode
 				if (_headerType != LORA_HEADER_IMPLICIT || _packetType != PACKET_TYPE_LORA) {
 					// not in the correct mode, nothing to do here
 					return SX1262Error::none;
@@ -1027,6 +1037,57 @@ namespace YOBA {
 
 				// read packet data starting at offset
 				error = readBuffer(data, length, offset);
+				if (error != SX1262Error::none)
+					return error;
+
+				return SX1262Error::none;
+			}
+
+			SX1262Error spectrumScan(uint32_t frequencyHz, float& rssi) {
+				uint16_t IRQMask = IRQ_RX_DONE;
+
+				IRQMask |= IRQ_TIMEOUT;
+
+				auto error = setDIOIRQParams(IRQMask, IRQMask);
+				if (error != SX1262Error::none)
+					return error;
+
+				error = clearIRQStatus();
+				if (error != SX1262Error::none)
+					return error;
+
+				error = setBufferBaseAddress();
+				if (error != SX1262Error::none)
+					return error;
+
+				error = updatePacketParams();
+				if (error != SX1262Error::none)
+					return error;
+
+				// LET'S FUCKING MOOOOVE
+				error = setRX(10'000);
+				if (error != SX1262Error::none)
+					return error;
+
+				error = waitForDIO1Semaphore(0'000);
+
+				if (error != SX1262Error::none && error != SX1262Error::timeout) {
+					finishReceive();
+
+					return error;
+				}
+
+				uint16_t IRQStatus = 0;
+
+				error = getIRQStatus(IRQStatus);
+				if (error != SX1262Error::none)
+					return error;
+
+				error = finishReceive();
+				if (error != SX1262Error::none)
+					return error;
+
+				error = getRSSI(rssi);
 				if (error != SX1262Error::none)
 					return error;
 
@@ -1216,7 +1277,7 @@ namespace YOBA {
 
 			spi_device_handle_t _SPIDevice {};
 
-			uint16_t _frequencyMHz = 0;
+			uint32_t _frequencyHz = 0;
 			uint8_t _LoRaSpreadingFactor = 0;
 			uint8_t _LoRaCodingRate = 0;
 			uint8_t _LoRaBandwidth = 0;
@@ -1271,7 +1332,7 @@ namespace YOBA {
 
 			// -------------------------------- Auxiliary --------------------------------
 
-			SX1262Error writeSPIBuffer(const uint16_t totalLength) {
+			SX1262Error writeSPIBuffer(const uint16_t totalLength) const {
 				if (waitForBusyPin() == SX1262Error::timeout)
 					return SX1262Error::timeout;
 
@@ -1359,9 +1420,9 @@ namespace YOBA {
 			}
 
 			static float getRSSIFromPacketStatus(const uint32_t packetStatus) {
-				const uint8_t rssiPkt = packetStatus & 0xFF;
+				const uint8_t RSSIValue = packetStatus & 0xFF;
 
-				return -1.f * rssiPkt / 2.f;
+				return RSSIValue / -2.f;
 			}
 
 			static float getSNRFromPacketStatus(const uint32_t packetStatus) {
@@ -1387,7 +1448,7 @@ namespace YOBA {
 			
 			// -------------------------------- Module properties --------------------------------
 			
-			constexpr static uint32_t RF_CRYSTAL_FREQUENCY_MHZ = 32;
+			constexpr static uint32_t RF_CRYSTAL_FREQUENCY_HZ = 32'000'000;
 			constexpr static uint32_t RF_DIVIDER = 1ULL << 25;
 			constexpr static uint8_t IMPLICIT_PACKET_LENGTH = 255;
 			
@@ -1504,7 +1565,7 @@ namespace YOBA {
 			constexpr static uint8_t CAL_IMG_863_MHZ_2 = 0xDB;
 			constexpr static uint8_t CAL_IMG_902_MHZ_1 = 0xE1;
 			constexpr static uint8_t CAL_IMG_902_MHZ_2 = 0xE9;
-			constexpr static uint8_t CAL_IMG_FREQ_TRIG_MHZ = 20;
+			constexpr static uint32_t CAL_IMG_FREQ_TRIG_HZ = 20'000'000;
 			
 			// CMD_SET_PA_CONFIG
 			constexpr static uint8_t PA_CONFIG_HP_MAX = 0x07;
