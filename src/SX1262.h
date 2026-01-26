@@ -1043,33 +1043,16 @@ namespace YOBA {
 				return SX1262Error::none;
 			}
 
-			SX1262Error spectrumScan(uint32_t frequencyHz, float& rssi) {
-				uint16_t IRQMask = IRQ_RX_DONE;
-
-				IRQMask |= IRQ_TIMEOUT;
-
-				auto error = setDIOIRQParams(IRQMask, IRQMask);
+			SX1262Error spectrumScan(uint32_t frequencyHz, float& RSSI) {
+				auto error = setRFFrequency(frequencyHz);
 				if (error != SX1262Error::none)
 					return error;
 
-				error = clearIRQStatus();
-				if (error != SX1262Error::none)
-					return error;
-
-				error = setBufferBaseAddress();
-				if (error != SX1262Error::none)
-					return error;
-
-				error = updatePacketParams();
-				if (error != SX1262Error::none)
-					return error;
-
-				// LET'S FUCKING MOOOOVE
 				error = setRX(10'000);
 				if (error != SX1262Error::none)
 					return error;
 
-				error = waitForDIO1Semaphore(0'000);
+				error = waitForDIO1Semaphore(10'000);
 
 				if (error != SX1262Error::none && error != SX1262Error::timeout) {
 					finishReceive();
@@ -1077,17 +1060,11 @@ namespace YOBA {
 					return error;
 				}
 
-				uint16_t IRQStatus = 0;
-
-				error = getIRQStatus(IRQStatus);
-				if (error != SX1262Error::none)
-					return error;
-
 				error = finishReceive();
 				if (error != SX1262Error::none)
 					return error;
 
-				error = getRSSI(rssi);
+				error = getRSSIInst(RSSI);
 				if (error != SX1262Error::none)
 					return error;
 
