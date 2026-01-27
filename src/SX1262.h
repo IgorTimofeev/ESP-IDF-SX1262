@@ -14,6 +14,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <ranges>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -1048,6 +1049,8 @@ namespace YOBA {
 				if (error != SX1262Error::none)
 					return error;
 
+				delayMs(10);
+
 				error = setRX(10'000);
 				if (error != SX1262Error::none)
 					return error;
@@ -1064,9 +1067,20 @@ namespace YOBA {
 				if (error != SX1262Error::none)
 					return error;
 
-				error = getRSSIInst(RSSI);
-				if (error != SX1262Error::none)
-					return error;
+				// RSSI multisampling
+				constexpr static uint8_t RSSISamplesLength = 128;
+				float RSSISamples[RSSISamplesLength];
+
+				for (uint8_t i = 0; i < RSSISamplesLength; i++) {
+					error = getRSSIInst(RSSISamples[i]);
+
+					if (error != SX1262Error::none)
+						return error;
+				}
+
+				// RSSI median value
+				std::ranges::sort(RSSISamples, std::greater<float>());
+				RSSI = RSSISamples[RSSISamplesLength / 2];
 
 				return SX1262Error::none;
 			}
