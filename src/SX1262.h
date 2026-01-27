@@ -1043,48 +1043,7 @@ namespace YOBA {
 
 				return SX1262Error::none;
 			}
-
-			SX1262Error spectrumScan(uint32_t frequencyHz, float& RSSI) {
-				auto error = setRFFrequency(frequencyHz);
-				if (error != SX1262Error::none)
-					return error;
-
-				delayMs(10);
-
-				error = setRX(10'000);
-				if (error != SX1262Error::none)
-					return error;
-
-				error = waitForDIO1Semaphore(10'000);
-
-				if (error != SX1262Error::none && error != SX1262Error::timeout) {
-					finishReceive();
-
-					return error;
-				}
-
-				error = finishReceive();
-				if (error != SX1262Error::none)
-					return error;
-
-				// RSSI multisampling
-				constexpr static uint8_t RSSISamplesLength = 128;
-				float RSSISamples[RSSISamplesLength];
-
-				for (uint8_t i = 0; i < RSSISamplesLength; i++) {
-					error = getRSSIInst(RSSISamples[i]);
-
-					if (error != SX1262Error::none)
-						return error;
-				}
-
-				// RSSI median value
-				std::ranges::sort(RSSISamples, std::greater<float>());
-				RSSI = RSSISamples[RSSISamplesLength / 2];
-
-				return SX1262Error::none;
-			}
-
+			
 			SX1262Error fixLoRaTXModulationBeforeTransmission() {
 				// fix tx modulation for 500 kHz LoRa
 				// see SX1262/SX1268 datasheet, chapter 15 Known Limitations, section 15.1 for details
