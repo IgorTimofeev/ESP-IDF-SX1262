@@ -129,7 +129,7 @@ namespace YOBA {
 				if (!checkESPError(ESPError))
 					return SX1262Error::SPI;
 
-				// -------------------------------- Initialization --------------------------------
+				// -------------------------------- Initialization sequence --------------------------------
 
 				auto error = reset();
 				if (error != SX1262Error::none)
@@ -193,7 +193,7 @@ namespace YOBA {
 				if (error != SX1262Error::none)
 					return error;
 
-				error = setLoRaCRC(2);
+				error = setLoRaCRC(true);
 				if (error != SX1262Error::none)
 					return error;
 
@@ -766,18 +766,8 @@ namespace YOBA {
 				return updatePacketParams();
 			}
 
-			/*!
-			  \brief Sets CRC configuration.
-			  \param len CRC length in bytes, Allowed values are 1 or 2, set to 0 to disable CRC.
-			*/
-			SX1262Error setLoRaCRC(const uint8_t len) {
-				// LoRa CRC doesn't allow to set CRC polynomial, initial value, or inversion
-				if (len) {
-					_crcType = LORA_CRC_ON;
-				}
-				else {
-					_crcType = LORA_CRC_OFF;
-				}
+			SX1262Error setLoRaCRC(const bool enabled) {
+				_crcType = enabled ? LORA_CRC_ON : LORA_CRC_OFF;
 
 				return updatePacketParams();
 			}
