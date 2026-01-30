@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstring>
 #include <ranges>
+#include <algorithm>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
