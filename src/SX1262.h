@@ -263,7 +263,7 @@ namespace YOBA {
 
 			SX1262Error validateChip() {
 				for (uint8_t i = 0; i < 10; ++i) {
-					uint8_t buffer[16] = {};
+					uint8_t buffer[16] {};
 					SPIReadRegister(REG_VERSION_STRING, buffer, 16);
 
 					if (strncmp(VERSION_STRING, reinterpret_cast<char*>(buffer), 6) == 0) {
@@ -291,7 +291,7 @@ namespace YOBA {
 			*/
 			SX1262Error calibrateImageRejection(const uint16_t freqMinHz, const uint16_t freqMaxHz) {
 				// calculate the calibration coefficients and calibrate image
-				uint8_t data[3] = {
+				uint8_t data[3] {
 					CMD_CALIBRATE_IMAGE,
 					static_cast<uint8_t>(std::floor((static_cast<float>(freqMinHz / 1'000) - 1.0f) / 4.0f)),
 					static_cast<uint8_t>(std::ceil((static_cast<float>(freqMaxHz / 1'000) + 1.0f) / 4.0f))
@@ -311,7 +311,7 @@ namespace YOBA {
 			  \returns \ref status_codes
 			*/
 			SX1262Error calibrateImage(const uint32_t frequencyHz) {
-				uint8_t data[3] = {
+				uint8_t data[3] {
 					CMD_CALIBRATE_IMAGE,
 					0,
 					0
@@ -382,7 +382,7 @@ namespace YOBA {
 
 				const auto regValue = static_cast<uint32_t>(static_cast<uint64_t>(frequencyHz) * static_cast<uint64_t>(RF_DIVIDER) / static_cast<uint64_t>(RF_CRYSTAL_FREQUENCY_HZ));
 
-				const uint8_t data[] = {
+				const uint8_t data[] {
 					CMD_SET_RF_FREQUENCY,
 					static_cast<uint8_t>((regValue >> 24) & 0xFF),
 					static_cast<uint8_t>((regValue >> 16) & 0xFF),
@@ -420,7 +420,7 @@ namespace YOBA {
 			}
 
 			SX1262Error setLoRaCADParams() {
-				const uint8_t data[] = {
+				const uint8_t data[] {
 					CMD_SET_CAD_PARAMS,
 					CAD_ON_8_SYMB,
 					static_cast<uint8_t>(_LoRaSpreadingFactor + 13),
@@ -435,7 +435,7 @@ namespace YOBA {
 			}
 
 			SX1262Error setBufferBaseAddress(const uint8_t rxAddress = 0x00, const uint8_t txAddress = 0x00) {
-				const uint8_t data[] = {
+				const uint8_t data[] {
 					CMD_SET_BUFFER_BASE_ADDRESS,
 					rxAddress,
 					txAddress
@@ -477,7 +477,7 @@ namespace YOBA {
 			}
 
 			SX1262Error clearIRQStatus(const uint16_t status = IRQ_ALL) {
-				const uint8_t data[] = {
+				const uint8_t data[] {
 					CMD_CLEAR_IRQ_STATUS,
 					static_cast<uint8_t>((status >> 8) & 0xFF),
 					static_cast<uint8_t>(status & 0xFF)
@@ -487,7 +487,7 @@ namespace YOBA {
 			}
 
 			SX1262Error setDIOIRQParams(const uint16_t irqMask = IRQ_NONE, const uint16_t dio1Mask = IRQ_NONE, const uint16_t dio2Mask = IRQ_NONE, const uint16_t dio3Mask = IRQ_NONE) {
-				const uint8_t data[] = {
+				const uint8_t data[] {
 					CMD_SET_DIO_IRQ_PARAMS,
 
 					static_cast<uint8_t>((irqMask >> 8) & 0xFF),
@@ -570,7 +570,7 @@ namespace YOBA {
 
 				// 500/9/8  - 0x09 0x04 0x03 0x00 - SF9, BW125, 4/8
 				// 500/11/8 - 0x0B 0x04 0x03 0x00 - SF11 BW125, 4/7
-				const uint8_t data[5] = {
+				const uint8_t data[5] {
 					CMD_SET_MODULATION_PARAMS,
 					_LoRaSpreadingFactor,
 					_LoRaBandwidth,
@@ -646,7 +646,7 @@ namespace YOBA {
 				if (error != SX1262Error::none)
 					return error;
 
-				const uint8_t data[7] = {
+				const uint8_t data[7] {
 					CMD_SET_PACKET_PARAMS,
 					static_cast<uint8_t>((preambleLength >> 8) & 0xFF),
 					static_cast<uint8_t>(preambleLength & 0xFF),
@@ -698,7 +698,7 @@ namespace YOBA {
 			}
 
 			SX1262Error getPacketStatus(uint32_t& status) {
-				uint8_t data[3] = {0, 0, 0};
+				uint8_t data[3] {0, 0, 0};
 
 				const auto error = SPIReadCommand(CMD_GET_PACKET_STATUS, data, 3);
 
@@ -930,7 +930,7 @@ namespace YOBA {
 				}
 
 				// if offset was requested, or in explicit mode, we always have to perform the SPI transaction
-				uint8_t data[] = {
+				uint8_t data[] {
 					0,
 					0
 				};
@@ -1288,7 +1288,7 @@ namespace YOBA {
 				// From datasheet: timeoutUs = timeoutValue * 15.625 µs
 				const uint32_t timeout = timeoutUs / 15.625f;
 
-				const uint8_t data[] = {
+				const uint8_t data[] {
 					command,
 					static_cast<uint8_t>((timeout >> 16) & 0xFF),
 					static_cast<uint8_t>((timeout >> 8) & 0xFF),
@@ -1334,7 +1334,7 @@ namespace YOBA {
 			 \returns \ref status_codes
 		   */
 			SX1262Error setPAConfig(const uint8_t paDutyCycle = 0x04, const uint8_t deviceSel = PA_CONFIG_SX1262, const uint8_t hpMax = PA_CONFIG_HP_MAX, const uint8_t paLut = PA_CONFIG_PA_LUT) {
-				const uint8_t data[5] = {
+				const uint8_t data[5] {
 					CMD_SET_PA_CONFIG,
 					paDutyCycle,
 					hpMax,
@@ -1351,7 +1351,7 @@ namespace YOBA {
 					return SX1262Error::invalidArgument;
 				}
 
-				const uint8_t data[] = {
+				const uint8_t data[] {
 					CMD_SET_TX_PARAMS,
 					static_cast<uint8_t>(power),
 					rampTime
