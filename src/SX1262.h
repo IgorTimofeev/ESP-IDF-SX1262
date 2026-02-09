@@ -285,6 +285,10 @@ namespace SX1262 {
 				return error::timeout;
 			}
 
+			void setSPIMutex(const SemaphoreHandle_t mutex) {
+				_SPIMutex = mutex;
+			}
+
 			error validateChip() {
 				for (uint8_t i = 0; i < 10; ++i) {
 					uint8_t buffer[16] {};
@@ -706,7 +710,7 @@ namespace SX1262 {
 				t.rx_buffer = _SPIBuffer;
 				t.length = 8 * (3 + length);
 
-				const auto state = checkESPError(spi_device_transmit(_SPIDevice, &t));
+				const auto state = SPITransmit(&t);
 
 				if (state) {
 					std::memcpy(data, _SPIBuffer + 3, length);
@@ -1160,7 +1164,7 @@ namespace SX1262 {
 				t.rx_buffer = _SPIBuffer;
 				t.length = 8 * (2 + length);
 
-				const auto state = checkESPError(spi_device_transmit(_SPIDevice, &t));
+				const auto state = SPITransmit(&t);
 
 				if (state) {
 					//				for (int i = 0; i < 3; ++i) {
@@ -1190,7 +1194,7 @@ namespace SX1262 {
 				t.rx_buffer = _SPIBuffer;
 				t.length = 8 * (4 + length);
 
-				const auto state = checkESPError(spi_device_transmit(_SPIDevice, &t));
+				const auto state = SPITransmit(&t);
 
 				if (state) {
 					std::memcpy(data, _SPIBuffer + 4, length);
@@ -1241,6 +1245,7 @@ namespace SX1262 {
 			SemaphoreHandle_t _DIO1PinSemaphore {};
 
 			spi_device_handle_t _SPIDevice {};
+			SemaphoreHandle_t _SPIMutex = nullptr;
 
 			uint32_t _frequencyHz = 0;
 			uint8_t _LoRaSpreadingFactor = 7;
@@ -1297,6 +1302,18 @@ namespace SX1262 {
 
 			// -------------------------------- Auxiliary --------------------------------
 
+			bool SPITransmit(spi_transaction_t* t) const {
+				if (_SPIMutex)
+					xSemaphoreTake(_SPIMutex, portMAX_DELAY);
+
+				const auto state = checkESPError(spi_device_transmit(_SPIDevice, t));
+
+				if (_SPIMutex)
+					xSemaphoreGive(_SPIMutex);
+
+				return state;
+			}
+
 			error writeSPIBuffer(const uint16_t totalLength) const {
 				if (waitForBusyPin() == error::timeout)
 					return error::timeout;
@@ -1305,7 +1322,7 @@ namespace SX1262 {
 				t.tx_buffer = _SPIBuffer;
 				t.length = 8 * totalLength;
 
-				return checkESPError(spi_device_transmit(_SPIDevice, &t)) ? error::none : error::SPITransaction;
+				return SPITransmit(&t) ? error::none : error::SPITransaction;
 			}
 
 			error setRXOrTX(const uint8_t command, const uint32_t timeoutUs) {
