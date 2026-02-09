@@ -8,7 +8,10 @@ if(ESP_PLATFORM)
     idf_component_register(
         SRCS ${YOBA_SOURCES}
         INCLUDE_DIRS src
-        REQUIRES esp_driver_spi
+        REQUIRES
+            esp_driver_spi
+            esp_driver_gpio
+            esp_timer
     )
 
     return()
