@@ -54,14 +54,16 @@ namespace SX1262 {
 
 	class Transceiver {
 		public:
+			Transceiver(
+				const gpio_num_t SSPin,
+				const gpio_num_t busyPin,
+				const gpio_num_t DIO1Pin,
+				const gpio_num_t RSTPin = GPIO_NUM_NC
+			);
+
 			error setup(
 				const spi_host_device_t SPIHostDevice,
 				const uint32_t SPIFrequencyHz,
-
-				const gpio_num_t SSPin,
-				const gpio_num_t RSTPin,
-				const gpio_num_t busyPin,
-				const gpio_num_t DIO1Pin,
 
 				const uint32_t frequencyHz,
 				const LoRaBandwidth bandwidth,
@@ -223,10 +225,10 @@ namespace SX1262 {
 
 			// -------------------------------- GPIO --------------------------------
 
-			gpio_num_t _SSPin = GPIO_NUM_NC;
-			gpio_num_t _busyPin = GPIO_NUM_NC;
-			gpio_num_t _RSTPin = GPIO_NUM_NC;
-			gpio_num_t _DIO1Pin = GPIO_NUM_NC;
+			gpio_num_t _SSPin;
+			gpio_num_t _busyPin;
+			gpio_num_t _DIO1Pin;
+			gpio_num_t _RSTPin;
 
 			void setSSPinLevel(const bool value) const;
 			void setRSTPinLevel(const bool value) const;

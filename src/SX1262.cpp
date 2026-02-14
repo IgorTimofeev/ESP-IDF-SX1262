@@ -40,15 +40,31 @@ namespace SX1262 {
 		}
 	}
 
-	error Transceiver::setup(const spi_host_device_t SPIHostDevice, const uint32_t SPIFrequencyHz, const gpio_num_t SSPin, const gpio_num_t RSTPin, const gpio_num_t busyPin, const gpio_num_t DIO1Pin, const uint32_t frequencyHz, const LoRaBandwidth bandwidth, const uint8_t spreadingFactor, const LoRaCodingRate codingRate, const uint8_t syncWord, const int8_t powerDBm, const uint16_t preambleLength, const bool useLDORegulator) {
-		_SSPin = SSPin;
-		_RSTPin = RSTPin;
-		_busyPin = busyPin;
-		_DIO1Pin = DIO1Pin;
+	Transceiver::Transceiver(const gpio_num_t SSPin, const gpio_num_t busyPin, const gpio_num_t DIO1Pin, const gpio_num_t RSTPin):
+		_SSPin(SSPin),
+		_busyPin(busyPin),
+		_DIO1Pin(DIO1Pin),
+		_RSTPin(RSTPin)
+	{
+
+	}
+
+	error Transceiver::setup(
+		const spi_host_device_t SPIHostDevice,
+		const uint32_t SPIFrequencyHz,
+
+		const uint32_t frequencyHz,
+		const LoRaBandwidth bandwidth,
+		const uint8_t spreadingFactor,
+		const LoRaCodingRate codingRate,
+		const uint8_t syncWord,
+		const int8_t powerDBm,
+		const uint16_t preambleLength,
+		const bool useLDORegulator
+	) {
 
 		// -------------------------------- GPIO output --------------------------------
 
-		// Output
 		gpio_config_t g {};
 
 		// SS
