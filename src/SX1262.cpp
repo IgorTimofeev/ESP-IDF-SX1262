@@ -518,16 +518,43 @@ namespace SX1262 {
 		}
 
 		_LoRaSpreadingFactor = spreadingFactor;
-		_LoRaBandwidth = bandwidth;
-		_LoRaCodingRate = codingRate;
 
-		// 500/9/8  - 0x09 0x04 0x03 0x00 - SF9, BW125, 4/8
-		// 500/11/8 - 0x0B 0x04 0x03 0x00 - SF11 BW125, 4/7
+		// Bandwidth
+		_LoRaBandwidth = bandwidth;
+		uint8_t bwRegVal = 0;
+
+		switch (_LoRaBandwidth) {
+			case LoRaBandwidth::bw7_81: bwRegVal = 0x00; break;
+			case LoRaBandwidth::bw10_42: bwRegVal = 0x08; break;
+			case LoRaBandwidth::bw15_63: bwRegVal = 0x01; break;
+			case LoRaBandwidth::bw20_83: bwRegVal = 0x09; break;
+			case LoRaBandwidth::bw31_25: bwRegVal = 0x02; break;
+			case LoRaBandwidth::bw41_67: bwRegVal = 0x0A; break;
+			case LoRaBandwidth::bw62_5: bwRegVal = 0x03; break;
+			case LoRaBandwidth::bw125_0: bwRegVal = 0x04; break;
+			case LoRaBandwidth::bw250_0: bwRegVal = 0x05; break;
+			case LoRaBandwidth::bw500_0: bwRegVal = 0x06; break;
+		}
+
+		// Coding rate
+		_LoRaCodingRate = codingRate;
+		uint8_t crRegVal = 0;
+
+		switch (_LoRaCodingRate) {
+			case LoRaCodingRate::cr4_5: crRegVal = 0x01; break;
+			case LoRaCodingRate::cr4_6: crRegVal = 0x02; break;
+			case LoRaCodingRate::cr4_7: crRegVal = 0x03; break;
+			case LoRaCodingRate::cr4_8: crRegVal = 0x04; break;
+			case LoRaCodingRate::cr4_5LongInterleaver: crRegVal = 0x05; break;
+			case LoRaCodingRate::cr4_6LongInterleaver: crRegVal = 0x06; break;
+			case LoRaCodingRate::cr4_8LongInterleaver: crRegVal = 0x07; break;
+		}
+
 		const uint8_t data[5] {
 			CMD_SET_MODULATION_PARAMS,
 			_LoRaSpreadingFactor,
-			static_cast<uint8_t>(_LoRaBandwidth),
-			static_cast<uint8_t>(_LoRaCodingRate),
+			bwRegVal,
+			crRegVal,
 			ldrOptimize
 		};
 
@@ -721,8 +748,8 @@ namespace SX1262 {
 
 	error Transceiver::waitForDIO1Semaphore(const uint32_t timeoutUs) const {
 		return
-		// Already in high
-		getDIO1PinLevel()
+			// Already in high
+			getDIO1PinLevel()
 			? error::none
 			// Wait for high
 			: (
@@ -734,8 +761,8 @@ namespace SX1262 {
 					// FreeRTOS tasks can handle at least portTICK_PERIOD_MS, also adding 100 ms for пропёрживание
 					: pdMS_TO_TICKS(std::max(timeoutUs / 1000 + 100, portTICK_PERIOD_MS))
 				) == pdTRUE
-					? error::none
-					: error::timeout
+				? error::none
+				: error::timeout
 			);
 	}
 
@@ -986,6 +1013,33 @@ namespace SX1262 {
 		return SPIWriteRegister(REG_TX_MODULATION, &txModulation, 1);
 	}
 
+	error Transceiver::setPAConfig(const uint8_t paDutyCycle, const uint8_t deviceSel, const uint8_t hpMax, const uint8_t paLut) {
+		const uint8_t data[5] {
+			CMD_SET_PA_CONFIG,
+			paDutyCycle,
+			hpMax,
+			deviceSel,
+			paLut
+		};
+
+		return SPIWrite(data, 5);
+	}
+
+	error Transceiver::setTXParams(const int8_t power, const uint8_t rampTime) {
+		if (power < -9 || power > 22) {
+			ESP_LOGE(_logTag, "set output power failed: value %d is out of range [-9; 22]", power);
+			return error::invalidArgument;
+		}
+
+		const uint8_t data[] {
+			CMD_SET_TX_PARAMS,
+			static_cast<uint8_t>(power),
+			rampTime
+		};
+
+		return SPIWrite(data, 3);
+	}
+
 	void Transceiver::setSSPinLevel(const bool value) const {
 		gpio_set_level(_SSPin, value);
 	}
@@ -998,6 +1052,10 @@ namespace SX1262 {
 		return gpio_get_level(_busyPin);
 	}
 
+	bool Transceiver::getDIO1PinLevel() const {
+		return gpio_get_level(_DIO1Pin);
+	}
+
 	void Transceiver::onBusyPinInterrupt() const {
 		BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
@@ -1006,10 +1064,6 @@ namespace SX1262 {
 		if (xHigherPriorityTaskWoken) {
 			portYIELD_FROM_ISR();
 		}
-	}
-
-	bool Transceiver::getDIO1PinLevel() const {
-		return gpio_get_level(_DIO1Pin);
 	}
 
 	void Transceiver::onDIO1PinInterrupt() const {
@@ -1022,35 +1076,6 @@ namespace SX1262 {
 		}
 	}
 
-	bool Transceiver::checkESPError(const esp_err_t error) {
-		if (error != ESP_OK) {
-			ESP_ERROR_CHECK_WITHOUT_ABORT(error);
-			return false;
-		}
-
-		return true;
-	}
-
-	error Transceiver::checkForLoRaPacketType() {
-		uint8_t packetType = 0;
-
-		const auto error = getPacketType(packetType);
-
-		if (error != error::none)
-			return error;
-
-		if (packetType != PACKET_TYPE_LORA) {
-			ESP_LOGE(_logTag, "failed to set coding rate: packet type %d is not LoRa", packetType);
-			return error::invalidPacketType;
-		}
-
-		return error::none;
-	}
-
-	void Transceiver::delayMs(const uint32_t ms) {
-		vTaskDelay(pdMS_TO_TICKS(std::max<uint32_t>(ms, portTICK_PERIOD_MS)));
-	}
-
 	error Transceiver::waitForBusyPin(const uint32_t timeoutMs) const {
 		if (!getBusyPinLevel() || xSemaphoreTake(_busyPinSemaphore, pdMS_TO_TICKS(timeoutMs)) == pdTRUE)
 			return error::none;
@@ -1058,6 +1083,18 @@ namespace SX1262 {
 		ESP_LOGE(_logTag, "failed to wait for busy pin: timeout reached");
 
 		return error::timeout;
+	}
+
+	bool Transceiver::SPITransmit(spi_transaction_t* t) const {
+		if (_SPIMutex)
+			xSemaphoreTake(_SPIMutex, portMAX_DELAY);
+
+		const auto state = checkESPError(spi_device_transmit(_SPIDevice, t));
+
+		if (_SPIMutex)
+			xSemaphoreGive(_SPIMutex);
+
+		return state;
 	}
 
 	error Transceiver::SPIReadCommand(const uint8_t command, uint8_t* data, const uint8_t length) {
@@ -1140,18 +1177,6 @@ namespace SX1262 {
 		return SPIWriteBuffer(3 + length);
 	}
 
-	bool Transceiver::SPITransmit(spi_transaction_t* t) const {
-		if (_SPIMutex)
-			xSemaphoreTake(_SPIMutex, portMAX_DELAY);
-
-		const auto state = checkESPError(spi_device_transmit(_SPIDevice, t));
-
-		if (_SPIMutex)
-			xSemaphoreGive(_SPIMutex);
-
-		return state;
-	}
-
 	error Transceiver::SPIWriteBuffer(const uint16_t totalLength) const {
 		if (waitForBusyPin() == error::timeout)
 			return error::timeout;
@@ -1161,6 +1186,35 @@ namespace SX1262 {
 		t.length = 8 * totalLength;
 
 		return SPITransmit(&t) ? error::none : error::SPITransaction;
+	}
+
+	bool Transceiver::checkESPError(const esp_err_t error) {
+		if (error != ESP_OK) {
+			ESP_ERROR_CHECK_WITHOUT_ABORT(error);
+			return false;
+		}
+
+		return true;
+	}
+
+	error Transceiver::checkForLoRaPacketType() {
+		uint8_t packetType = 0;
+
+		const auto error = getPacketType(packetType);
+
+		if (error != error::none)
+			return error;
+
+		if (packetType != PACKET_TYPE_LORA) {
+			ESP_LOGE(_logTag, "failed to set coding rate: packet type %d is not LoRa", packetType);
+			return error::invalidPacketType;
+		}
+
+		return error::none;
+	}
+
+	void Transceiver::delayMs(const uint32_t ms) {
+		vTaskDelay(pdMS_TO_TICKS(std::max<uint32_t>(ms, portTICK_PERIOD_MS)));
 	}
 
 	error Transceiver::setRXOrTX(const uint8_t command, const uint32_t timeoutUs) {
@@ -1199,33 +1253,6 @@ namespace SX1262 {
 
 		// update with the new value
 		return SPIWriteRegister(REG_IQ_CONFIG, &iqConfigCurrent, 1);
-	}
-
-	error Transceiver::setPAConfig(const uint8_t paDutyCycle, const uint8_t deviceSel, const uint8_t hpMax, const uint8_t paLut) {
-		const uint8_t data[5] {
-			CMD_SET_PA_CONFIG,
-			paDutyCycle,
-			hpMax,
-			deviceSel,
-			paLut
-		};
-
-		return SPIWrite(data, 5);
-	}
-
-	error Transceiver::setTXParams(const int8_t power, const uint8_t rampTime) {
-		if (power < -9 || power > 22) {
-			ESP_LOGE(_logTag, "set output power failed: value %d is out of range [-9; 22]", power);
-			return error::invalidArgument;
-		}
-
-		const uint8_t data[] {
-			CMD_SET_TX_PARAMS,
-			static_cast<uint8_t>(power),
-			rampTime
-		};
-
-		return SPIWrite(data, 3);
 	}
 
 	float Transceiver::getRSSIFromPacketStatus(const uint32_t packetStatus) {

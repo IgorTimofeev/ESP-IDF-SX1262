@@ -29,27 +29,27 @@ namespace SX1262 {
 	void errorToString(const error error, char* str, const size_t length);
 
 	enum class LoRaCodingRate : uint8_t {
-		cr4_5 = 0x01,                // 4/5
-		cr4_6 = 0x02,                // 4/6
-		cr4_7 = 0x03,                // 4/7
-		cr4_8 = 0x04,                // 4/8
+		cr4_5,                // 4/5
+		cr4_6,                // 4/6
+		cr4_7,                // 4/7
+		cr4_8,                // 4/8
 
-		cr4_5LongInterleaver = 0x05, // 4/5, long interleaver
-		cr4_6LongInterleaver = 0x06,  // 4/6, long interleaver
-		cr4_8LongInterleaver = 0x07,  // 4/8, long interleaver
+		cr4_5LongInterleaver, // 4/5, long interleaver
+		cr4_6LongInterleaver, // 4/6, long interleaver
+		cr4_8LongInterleaver, // 4/8, long interleaver
 	};
 
 	enum class LoRaBandwidth : uint8_t {
-		bw7_8 = 0x00,   // 7.8 kHz
-		bw10_4 = 0x08,  // 10.4 kHz
-		bw15_6 = 0x01,  // 15.6 kHz
-		bw20_8 = 0x09,  // 20.8 kHz
-		bw31_25 = 0x02, // 31.25 kHz
-		bw41_7 = 0x0A,  // 41.7 kHz
-		bw62_5 = 0x03,  // 62.5 kHz
-		bw125_0 = 0x04, // 125.0 kHz
-		bw250_0 = 0x05, // 250.0 kHz
-		bw500_0 = 0x06, // 500.0 kHz
+		bw7_81,  // 7.81 kHz
+		bw10_42, // 10.42 kHz
+		bw15_63, // 15.63 kHz
+		bw20_83, // 20.83 kHz
+		bw31_25, // 31.25 kHz
+		bw41_67, // 41.67 kHz
+		bw62_5,  // 62.5 kHz
+		bw125_0, // 125.0 kHz
+		bw250_0, // 250.0 kHz
+		bw500_0, // 500.0 kHz
 	};
 
 	class Transceiver {
