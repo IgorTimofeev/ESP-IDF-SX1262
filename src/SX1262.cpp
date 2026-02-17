@@ -225,7 +225,6 @@ namespace SX1262 {
 		if (error != error::none)
 			return error;
 
-		// Depends on spreading factor
 		error = setLoRaCADParams();
 		if (error != error::none)
 			return error;
@@ -299,20 +298,6 @@ namespace SX1262 {
 		return error::invalidChip;
 	}
 
-	error Transceiver::calibrateImageRejection(const uint16_t freqMinHz, const uint16_t freqMaxHz) {
-		// calculate the calibration coefficients and calibrate image
-		uint8_t data[3] {
-			CMD_CALIBRATE_IMAGE,
-			static_cast<uint8_t>(std::floor((static_cast<float>(freqMinHz / 1'000) - 1.0f) / 4.0f)),
-			static_cast<uint8_t>(std::ceil((static_cast<float>(freqMaxHz / 1'000) + 1.0f) / 4.0f))
-		};
-
-		data[0] = (data[0] % 2) ? data[0] : data[0] - 1;
-		data[1] = (data[1] % 2) ? data[1] : data[1] + 1;
-
-		return SPIWrite(data, 3);
-	}
-
 	error Transceiver::calibrateImage(const uint32_t frequencyHz) {
 		uint8_t data[3] {
 			CMD_CALIBRATE_IMAGE,
@@ -321,7 +306,7 @@ namespace SX1262 {
 		};
 
 		// try to match the frequency ranges
-		if (frequencyHz >= 902'000'000 && frequencyHz <= 928'000'000) {
+		if (frequencyHz >= 902'000'000) {
 			data[1] = CAL_IMG_902_MHZ_1;
 			data[2] = CAL_IMG_902_MHZ_2;
 		}
@@ -337,19 +322,12 @@ namespace SX1262 {
 			data[1] = CAL_IMG_470_MHZ_1;
 			data[2] = CAL_IMG_470_MHZ_2;
 		}
-		else if (frequencyHz >= 430'000'000 && frequencyHz <= 440'000'000) {
+		else {
 			data[1] = CAL_IMG_430_MHZ_1;
 			data[2] = CAL_IMG_430_MHZ_2;
 		}
 
-		// matched with predefined ranges, do the calibration
-		if (data[1]) {
-			return SPIWrite(data, 3);
-		}
-
-		// if nothing matched, try custom calibration - they may or may not work
-		ESP_LOGW(_logTag, "failed to match predefined frequency range, trying custom");
-		return calibrateImageRejection(frequencyHz - 4'000'000, frequencyHz + 4'000'000);
+		return SPIWrite(data, 3);
 	}
 
 	error Transceiver::setRFFrequency(const uint32_t frequencyHz) {
@@ -420,7 +398,7 @@ namespace SX1262 {
 		const uint8_t data[] {
 			CMD_SET_CAD_PARAMS,
 			CAD_ON_8_SYMB,
-			static_cast<uint8_t>(static_cast<uint8_t>(_LoRaSpreadingFactor) + 13),
+			static_cast<uint8_t>(_LoRaSpreadingFactor + 13),
 			CAD_PARAM_DET_MIN,
 			CAD_GOTO_STDBY,
 			0x00,

@@ -80,15 +80,6 @@ namespace SX1262 {
 			error validateChip();
 
 			/*!
-			  \brief Perform image rejection calibration for the specified frequency band.
-			  WARNING: Use at your own risk! Setting incorrect values may lead to decreased performance
-			  \param freqMinHz Frequency band lower bound.
-			  \param freqMaxHz Frequency band upper bound.
-			  \returns \ref status_codes
-			*/
-			error calibrateImageRejection(const uint16_t freqMinHz, const uint16_t freqMaxHz);
-
-			/*!
 			  \brief Perform image rejection calibration for the specified frequency.
 			  Will try to use Semtech-defined presets first, and if none of them matches,
 			  custom iamge calibration will be attempted using calibrateImageRejection.
@@ -109,6 +100,7 @@ namespace SX1262 {
 			error setRX(const uint32_t timeoutUs = RX_TIMEOUT_NONE);
 			error setTX(const uint32_t timeoutUs = 0);
 			error setRXTXFallbackMode(const uint8_t value = RX_TX_FALLBACK_MODE_STDBY_RC);
+			// Depends on spreading factor
 			error setLoRaCADParams();
 			error setBufferBaseAddress(const uint8_t rxAddress = 0x00, const uint8_t txAddress = 0x00);
 			error getStatus(uint8_t& status);
