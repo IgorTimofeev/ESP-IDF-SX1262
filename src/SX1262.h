@@ -71,9 +71,11 @@ namespace SX1262 {
 				const uint8_t spreadingFactor,
 				const LoRaCodingRate codingRate,
 				const uint8_t syncWord,
-				const int8_t powerDBm,
 				const uint16_t preambleLength,
-				const bool useLDORegulator = false
+
+				const uint8_t currentLimitMA,
+				const int8_t powerDBm,
+				const bool useLDORegulator
 			);
 
 			error reset();

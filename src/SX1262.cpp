@@ -58,8 +58,10 @@ namespace SX1262 {
 		const uint8_t spreadingFactor,
 		const LoRaCodingRate codingRate,
 		const uint8_t syncWord,
-		const int8_t powerDBm,
 		const uint16_t preambleLength,
+
+		const uint8_t currentLimitMA,
+		const int8_t powerDBm,
 		const bool useLDORegulator
 	) {
 
@@ -191,7 +193,7 @@ namespace SX1262 {
 		if (error != error::none)
 			return error;
 
-		error = setCurrentLimit(60.0);
+		error = setCurrentLimit(currentLimitMA);
 		if (error != error::none)
 			return error;
 
