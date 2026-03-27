@@ -14,28 +14,28 @@
 #include <esp_log.h>
 
 namespace SX1262 {
-	void errorToString(const error error, char* str, const size_t length) {
+	void errorToString(const error error, const std::span<char> str) {
 		switch (error) {
 			case error::none:
-				std::strncpy(str, "none", length);
+				std::strncpy(str.data(), "none", str.size());
 				break;
 			case error::invalidChip:
-				std::strncpy(str, "invalid chip", length);
+				std::strncpy(str.data(), "invalid chip", str.size());
 				break;
 			case error::SPITransaction:
-				std::strncpy(str, "SPI transaction", length);
+				std::strncpy(str.data(), "SPI transaction", str.size());
 				break;
 			case error::timeout:
-				std::strncpy(str, "timeout", length);
+				std::strncpy(str.data(), "timeout", str.size());
 				break;
 			case error::invalidArgument:
-				std::strncpy(str, "invalid argument", length);
+				std::strncpy(str.data(), "invalid argument", str.size());
 				break;
 			case error::invalidPacketType:
-				std::strncpy(str, "invalid packet type", length);
+				std::strncpy(str.data(), "invalid packet type", str.size());
 				break;
 			case error::invalidChecksum:
-				std::strncpy(str, "invalid checksum", length);
+				std::strncpy(str.data(), "invalid checksum", str.size());
 				break;
 		}
 	}
@@ -280,7 +280,7 @@ namespace SX1262 {
 	error Transceiver::validateChip() {
 		for (uint8_t i = 0; i < 10; ++i) {
 			uint8_t buffer[16] {};
-			SPIReadRegister(REG_VERSION_STRING, buffer, 16);
+			SPIReadRegister(REG_VERSION_STRING, { buffer, 16 });
 
 			if (strncmp(VERSION_STRING, reinterpret_cast<char*>(buffer), 6) == 0) {
 				ESP_LOGI(_logTag, "chip version: %s", buffer);
@@ -420,11 +420,11 @@ namespace SX1262 {
 	}
 
 	error Transceiver::getStatus(uint8_t& status) {
-		return SPIReadCommand(CMD_GET_STATUS, &status, 1);
+		return SPIReadCommand(CMD_GET_STATUS, { &status, 1 });
 	}
 
 	error Transceiver::getPacketType(uint8_t& packetType) {
-		return SPIReadCommand(CMD_GET_PACKET_TYPE, &packetType, 1);
+		return SPIReadCommand(CMD_GET_PACKET_TYPE, { &packetType, 1 });
 	}
 
 	error Transceiver::setPacketType(const uint8_t packetType) {
@@ -438,7 +438,7 @@ namespace SX1262 {
 	error Transceiver::getIRQStatus(uint16_t& status) {
 		status = 0;
 
-		const auto error = SPIReadCommand(CMD_GET_IRQ_STATUS, reinterpret_cast<uint8_t*>(&status), 2);
+		const auto error = SPIReadCommand(CMD_GET_IRQ_STATUS, { reinterpret_cast<uint8_t*>(&status), 2 });
 
 		if (error != error::none) {
 			ESP_LOGE(_logTag, "failed to get IRQ status");
@@ -491,7 +491,7 @@ namespace SX1262 {
 			static_cast<uint8_t>(((syncWord & 0x0F) << 4) | (controlBits & 0x0F))
 		};
 
-		return SPIWriteRegister(REG_LORA_SYNC_WORD_MSB, data, 2);
+		return SPIWriteRegister(REG_LORA_SYNC_WORD_MSB, { data, 2 });
 	}
 
 	error Transceiver::setCurrentLimit(const float currentLimit) {
@@ -504,7 +504,7 @@ namespace SX1262 {
 		// calculate raw value
 		const auto rawLimit = static_cast<uint8_t>(currentLimit / 2.5f);
 
-		return SPIWriteRegister(REG_OCP_CONFIGURATION, &rawLimit, 1);
+		return SPIWriteRegister(REG_OCP_CONFIGURATION, { &rawLimit, 1 });
 	}
 
 	error Transceiver::setDio2AsRfSwitch(const bool enable) {
@@ -567,7 +567,7 @@ namespace SX1262 {
 
 		uint8_t clampConfig = 0;
 
-		const auto error = SPIReadRegister(REG_TX_CLAMP_CONFIG, &clampConfig, 1);
+		const auto error = SPIReadRegister(REG_TX_CLAMP_CONFIG, { &clampConfig, 1 });
 
 		if (error != error::none)
 			return error;
@@ -580,14 +580,14 @@ namespace SX1262 {
 			clampConfig = (clampConfig & ~0x1E) | 0x08;
 		}
 
-		return SPIWriteRegister(REG_TX_CLAMP_CONFIG, &clampConfig, 1);
+		return SPIWriteRegister(REG_TX_CLAMP_CONFIG, { &clampConfig, 1 });
 	}
 
 	error Transceiver::setOutputPower(int8_t powerDBm) {
 		// get current OCP configuration
 		uint8_t ocp = 0;
 
-		auto error = SPIReadRegister(REG_OCP_CONFIGURATION, &ocp, 1);
+		auto error = SPIReadRegister(REG_OCP_CONFIGURATION, { &ocp, 1 });
 
 		if (error != error::none) {
 			ESP_LOGE(_logTag, "set output power failed: unable to receive OCP configuration");
@@ -611,7 +611,7 @@ namespace SX1262 {
 		}
 
 		// restore OCP configuration
-		return SPIWriteRegister(REG_OCP_CONFIGURATION, &ocp, 1);
+		return SPIWriteRegister(REG_OCP_CONFIGURATION, { &ocp, 1 });
 	}
 
 	error Transceiver::setPacketParams(const uint16_t preambleLength, const uint8_t headerType, const uint8_t length, const uint8_t crcType, const uint8_t invertIQ) {
@@ -633,16 +633,16 @@ namespace SX1262 {
 		return SPIWrite(data, 7);
 	}
 
-	error Transceiver::writeBuffer(const uint8_t* data, const uint8_t length, const uint8_t offset) {
+	error Transceiver::writeBuffer(const std::span<const uint8_t> data, const uint8_t offset) {
 		_SPIBuffer[0] = CMD_WRITE_BUFFER;
 		_SPIBuffer[1] = offset;
 
-		std::memcpy(_SPIBuffer + 2, data, length);
+		std::memcpy(_SPIBuffer + 2, data.data(), data.size());
 
-		return SPIWriteBuffer(2 + length);
+		return SPIWriteBuffer(2 + data.size());
 	}
 
-	error Transceiver::readBuffer(uint8_t* data, const uint8_t length, const uint8_t offset) {
+	error Transceiver::readBuffer(const std::span<uint8_t> data, const uint8_t offset) {
 		if (waitForBusyPin() == error::timeout)
 			return error::timeout;
 
@@ -654,12 +654,12 @@ namespace SX1262 {
 		spi_transaction_t t {};
 		t.tx_buffer = _SPIBuffer;
 		t.rx_buffer = _SPIBuffer;
-		t.length = 8 * (3 + length);
+		t.length = 8 * (3 + data.size());
 
 		const auto state = SPITransmit(&t);
 
 		if (state) {
-			std::memcpy(data, _SPIBuffer + 3, length);
+			std::memcpy(data.data(), _SPIBuffer + 3, data.size());
 
 			//
 			//				for (int i = 0; i < 3 + length; ++i) {
@@ -674,7 +674,7 @@ namespace SX1262 {
 	error Transceiver::getPacketStatus(uint32_t& status) {
 		uint8_t data[3] {0, 0, 0};
 
-		const auto error = SPIReadCommand(CMD_GET_PACKET_STATUS, data, 3);
+		const auto error = SPIReadCommand(CMD_GET_PACKET_STATUS, { data, 3 });
 
 		if (error != error::none)
 			return error;
@@ -700,7 +700,7 @@ namespace SX1262 {
 	error Transceiver::getRSSIInst(float& rssi) {
 		uint8_t rssiRaw = 0;
 
-		const auto error = SPIReadCommand(CMD_GET_RSSI_INST, &rssiRaw, 1);
+		const auto error = SPIReadCommand(CMD_GET_RSSI_INST, { &rssiRaw, 1 });
 
 		if (error != error::none)
 			return error;
@@ -766,26 +766,26 @@ namespace SX1262 {
 			);
 	}
 
-	error Transceiver::transmit(const uint8_t* data, uint8_t length, uint32_t timeoutUs) {
+	error Transceiver::transmit(const std::span<const uint8_t> data, uint32_t timeoutUs) {
 		//				if (!setStandby())
 		//					return false;
 
 		// Check packet length
 		if (_LoRaCodingRate > LoRaCodingRate::cr4_8) {
 			// Long interleaver needs at least 8 bytes
-			if (length < 8) {
+			if (data.size() < 8) {
 				ESP_LOGE(_logTag, "failed to transmit: packet is too short for long interleaver coding rate");
 				return error::invalidArgument;
 			}
 
 			// Long interleaver supports up to 253 bytes if CRC is enabled
-			if (_crcType == LORA_CRC_ON && length > IMPLICIT_PACKET_LENGTH - 2) {
+			if (_crcType == LORA_CRC_ON && data.size() > IMPLICIT_PACKET_LENGTH - 2) {
 				ESP_LOGE(_logTag, "failed to transmit: packet is too long for long interleaver coding rate");
 				return error::invalidArgument;
 			}
 		}
 
-		auto error = updatePacketParams(length);
+		auto error = updatePacketParams(data.size());
 		if (error != error::none)
 			return error;
 
@@ -802,7 +802,7 @@ namespace SX1262 {
 		if (error != error::none)
 			return error;
 
-		error = writeBuffer(data, length);
+		error = writeBuffer(data);
 		if (error != error::none)
 			return error;
 
@@ -856,21 +856,21 @@ namespace SX1262 {
 		// stop RTC counter
 		constexpr uint8_t rtcStop = 0x00;
 
-		auto error = SPIWriteRegister(REG_RTC_CTRL, &rtcStop, 1);
+		auto error = SPIWriteRegister(REG_RTC_CTRL, { &rtcStop, 1 });
 		if (error != error::none)
 			return error;
 
 		// read currently active event
 		uint8_t rtcEvent = 0;
 
-		error = SPIWriteRegister(REG_EVENT_MASK, &rtcEvent, 1);
+		error = SPIWriteRegister(REG_EVENT_MASK, { &rtcEvent, 1 });
 		if (error != error::none)
 			return error;
 
 		// clear events
 		rtcEvent |= 0x02;
 
-		error = SPIWriteRegister(REG_EVENT_MASK, &rtcEvent, 1);
+		error = SPIWriteRegister(REG_EVENT_MASK, { &rtcEvent, 1 });
 		if (error != error::none)
 			return error;
 
@@ -892,7 +892,7 @@ namespace SX1262 {
 			0
 		};
 
-		const auto error = SPIReadCommand(CMD_GET_RX_BUFFER_STATUS, data, 2);
+		const auto error = SPIReadCommand(CMD_GET_RX_BUFFER_STATUS, { data, 2 });
 		if (error != error::none)
 			return error;
 
@@ -912,7 +912,7 @@ namespace SX1262 {
 		return error;
 	}
 
-	error Transceiver::receive(uint8_t* data, uint8_t& length, uint32_t timeoutUs) {
+	error Transceiver::receive(uint8_t* buffer, uint8_t& receivedLength, uint32_t timeoutUs) {
 		//				if (!setStandby())
 		//					return false;
 
@@ -978,14 +978,14 @@ namespace SX1262 {
 		// get packet length and Rx buffer offset
 		uint8_t offset = 0;
 
-		error = getPacketLength(length, offset);
+		error = getPacketLength(receivedLength, offset);
 		if (error != error::none)
 			return error;
 
 		//				ESP_LOGI(_logTag, "receive() length: %d, offset: %d", length, offset);
 
 		// read packet data starting at offset
-		error = readBuffer(data, length, offset);
+		error = readBuffer({ buffer, receivedLength }, offset);
 		if (error != error::none)
 			return error;
 
@@ -998,7 +998,7 @@ namespace SX1262 {
 
 		uint8_t txModulation = 0;
 
-		const auto error = SPIReadRegister(REG_TX_MODULATION, &txModulation, 1);
+		const auto error = SPIReadRegister(REG_TX_MODULATION, { &txModulation, 1 });
 		if (error != error::none)
 			return error;
 
@@ -1010,7 +1010,7 @@ namespace SX1262 {
 			txModulation |= 0x04;
 		}
 
-		return SPIWriteRegister(REG_TX_MODULATION, &txModulation, 1);
+		return SPIWriteRegister(REG_TX_MODULATION, { &txModulation, 1 });
 	}
 
 	error Transceiver::setPAConfig(const uint8_t paDutyCycle, const uint8_t deviceSel, const uint8_t hpMax, const uint8_t paLut) {
@@ -1097,7 +1097,7 @@ namespace SX1262 {
 		return state;
 	}
 
-	error Transceiver::SPIReadCommand(const uint8_t command, uint8_t* data, const uint8_t length) {
+	error Transceiver::SPIReadCommand(const uint8_t command, std::span<uint8_t> data) {
 		if (waitForBusyPin() == error::timeout)
 			return error::timeout;
 
@@ -1108,7 +1108,7 @@ namespace SX1262 {
 		spi_transaction_t t {};
 		t.tx_buffer = _SPIBuffer;
 		t.rx_buffer = _SPIBuffer;
-		t.length = 8 * (2 + length);
+		t.length = 8 * (2 + data.size());
 
 		const auto state = SPITransmit(&t);
 
@@ -1117,7 +1117,7 @@ namespace SX1262 {
 			//					ESP_LOGI(_logTag, "SPIReadCommand buffer[%d]: %d", i, _SPIBuffer[i]);
 			//				}
 
-			std::memcpy(data, _SPIBuffer + 2, length);
+			std::memcpy(data.data(), _SPIBuffer + 2, data.size());
 
 			return error::none;
 		}
@@ -1125,7 +1125,7 @@ namespace SX1262 {
 		return error::SPITransaction;
 	}
 
-	error Transceiver::SPIReadRegister(const uint16_t reg, uint8_t* data, const size_t length) {
+	error Transceiver::SPIReadRegister(const uint16_t reg, const std::span<uint8_t> data) {
 		if (waitForBusyPin() == error::timeout)
 			return error::timeout;
 
@@ -1138,12 +1138,12 @@ namespace SX1262 {
 		spi_transaction_t t {};
 		t.tx_buffer = _SPIBuffer;
 		t.rx_buffer = _SPIBuffer;
-		t.length = 8 * (4 + length);
+		t.length = 8 * (4 + data.size());
 
 		const auto state = SPITransmit(&t);
 
 		if (state) {
-			std::memcpy(data, _SPIBuffer + 4, length);
+			std::memcpy(data.data(), _SPIBuffer + 4, data.size());
 
 			//				for (int i = 0; i < 4 + length; ++i) {
 			//					ESP_LOGI(_logTag, "SPIReadRegister buffer[%d]: %d", i, _SPIBuffer[i]);
@@ -1167,14 +1167,14 @@ namespace SX1262 {
 		return SPIWriteBuffer(2);
 	}
 
-	error Transceiver::SPIWriteRegister(const uint16_t reg, const uint8_t* data, const size_t length) {
+	error Transceiver::SPIWriteRegister(const uint16_t reg, const std::span<const uint8_t> data) {
 		_SPIBuffer[0] = CMD_WRITE_REGISTER;
-		_SPIBuffer[1] = (reg >> 8) & 0xFF; // Reg MSB
-		_SPIBuffer[2] = reg & 0xFF;        // Reg LSB
+		_SPIBuffer[1] = (reg >> 8) & 0xFF;  // Reg MSB
+		_SPIBuffer[2] = reg & 0xFF;         // Reg LSB
 
-		std::memcpy(_SPIBuffer + 3, data, length);
+		std::memcpy(_SPIBuffer + 3, data.data(), data.size());
 
-		return SPIWriteBuffer(3 + length);
+		return SPIWriteBuffer(3 + data.size());
 	}
 
 	error Transceiver::SPIWriteBuffer(const uint16_t totalLength) const {
@@ -1238,7 +1238,7 @@ namespace SX1262 {
 		// read current IQ configuration
 		uint8_t iqConfigCurrent = 0;
 
-		const auto error = SPIReadRegister(REG_IQ_CONFIG, &iqConfigCurrent, 1);
+		const auto error = SPIReadRegister(REG_IQ_CONFIG, { &iqConfigCurrent, 1 });
 
 		if (error != error::none)
 			return error;
@@ -1252,7 +1252,7 @@ namespace SX1262 {
 		}
 
 		// update with the new value
-		return SPIWriteRegister(REG_IQ_CONFIG, &iqConfigCurrent, 1);
+		return SPIWriteRegister(REG_IQ_CONFIG, { &iqConfigCurrent, 1 });
 	}
 
 	float Transceiver::getRSSIFromPacketStatus(const uint32_t packetStatus) {

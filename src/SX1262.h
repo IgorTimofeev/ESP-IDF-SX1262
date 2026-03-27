@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
@@ -26,7 +27,7 @@ namespace SX1262 {
 		invalidChecksum
 	};
 
-	void errorToString(const error error, char* str, const size_t length);
+	void errorToString(const error error, const std::span<char> str);
 
 	enum class LoRaCodingRate : uint8_t {
 		cr4_5,                // 4/5
@@ -153,8 +154,8 @@ namespace SX1262 {
 				const uint8_t invertIQ
 			);
 
-			error writeBuffer(const uint8_t* data, const uint8_t length, const uint8_t offset = 0x00);
-			error readBuffer(uint8_t* data, const uint8_t length, const uint8_t offset);
+			error writeBuffer(const std::span<const uint8_t> data, const uint8_t offset = 0x00);
+			error readBuffer(const std::span<uint8_t> data, const uint8_t offset);
 			error getPacketStatus(uint32_t& status);
 			error getRSSI(float& rssi);
 			error getRSSIInst(float& rssi);
@@ -181,11 +182,11 @@ namespace SX1262 {
 		   */
 			error invertLoRaIQ(const bool enable);
 			error waitForDIO1Semaphore(const uint32_t timeoutUs) const;
-			error transmit(const uint8_t* data, uint8_t length, uint32_t timeoutUs = 0);
+			error transmit(const std::span<const uint8_t> data, uint32_t timeoutUs = 0);
 			error fixImplicitTimeout();
 			error getPacketLength(uint8_t& length, uint8_t& offset);
 			error finishReceive();
-			error receive(uint8_t* data, uint8_t& length, uint32_t timeoutUs = 0);
+			error receive(uint8_t* buffer, uint8_t& receivedLength, uint32_t timeoutUs = 0);
 			error fixLoRaTXModulationBeforeTransmission();
 
 			/*!
@@ -246,11 +247,11 @@ namespace SX1262 {
 			uint8_t _SPIBuffer[_SPIBufferLength] {};
 
 			bool SPITransmit(spi_transaction_t* t) const;
-			error SPIReadCommand(const uint8_t command, uint8_t* data, const uint8_t length);
-			error SPIReadRegister(const uint16_t reg, uint8_t* data, const size_t length);
+			error SPIReadCommand(const uint8_t command, const std::span<uint8_t> data);
+			error SPIReadRegister(const uint16_t reg, const std::span<uint8_t> data);
 			error SPIWrite(const uint8_t* data, const uint16_t length);
 			error SPIWriteCommandAndUint8(const uint8_t command, const uint8_t data);
-			error SPIWriteRegister(const uint16_t reg, const uint8_t* data, const size_t length);
+			error SPIWriteRegister(const uint16_t reg, const std::span<const uint8_t> data);
 			error SPIWriteBuffer(const uint16_t totalLength) const;
 
 			// -------------------------------- Auxiliary --------------------------------
