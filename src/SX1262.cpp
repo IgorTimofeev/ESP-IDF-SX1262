@@ -284,11 +284,8 @@ namespace SX1262 {
 			uint8_t buffer[16] {};
 			SPIReadRegister(REG_VERSION_STRING, { buffer, 16 });
 
-			if (strncmp(VERSION_STRING, reinterpret_cast<char*>(buffer), 6) == 0) {
-				ESP_LOGI(_logTag, "chip version: %s", buffer);
-
+			if (strncmp(VERSION_STRING, reinterpret_cast<char*>(buffer), 6) == 0)
 				return error::none;
-			}
 
 			ESP_LOGE(_logTag, "failed to validate chip: version mismatch, attempt is %d, value is %s", i, buffer);
 
