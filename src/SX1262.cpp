@@ -81,29 +81,15 @@ namespace YOBA {
 
 		// -------------------------------- Interrupts --------------------------------
 
-		gpio_install_isr_service(0);
+		gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
 
 		// Busy
 		_busyPinSemaphore = xSemaphoreCreateBinary();
-
-		gpio_isr_handler_add(
-			_busyPin,
-			[](void* arg) {
-				static_cast<SX1262*>(arg)->onBusyPinInterrupt();
-			},
-			this
-		);
+		gpio_isr_handler_add(_busyPin, onBusyPinInterrupt,this);
 
 		// DIO1
 		_DIO1PinSemaphore = xSemaphoreCreateBinary();
-
-		gpio_isr_handler_add(
-			_DIO1Pin,
-			[](void* arg) {
-				static_cast<SX1262*>(arg)->onDIO1PinInterrupt();
-			},
-			this
-		);
+		gpio_isr_handler_add(_DIO1Pin, onDIO1PinInterrupt, this);
 
 		// -------------------------------- SPI --------------------------------
 
@@ -1070,24 +1056,22 @@ namespace YOBA {
 		return gpio_get_level(_DIO1Pin);
 	}
 
-	void SX1262::onBusyPinInterrupt() const {
-		BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+	void SX1262::onBusyPinInterrupt(void* arg) {
+		BaseType_t higherPriorityTaskWoken = pdFALSE;
 
-		xSemaphoreGiveFromISR(_busyPinSemaphore, &xHigherPriorityTaskWoken);
+		xSemaphoreGiveFromISR(static_cast<SX1262*>(arg)->_busyPinSemaphore, &higherPriorityTaskWoken);
 
-		if (xHigherPriorityTaskWoken) {
+		if (higherPriorityTaskWoken)
 			portYIELD_FROM_ISR();
-		}
 	}
 
-	void SX1262::onDIO1PinInterrupt() const {
-		BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+	void SX1262::onDIO1PinInterrupt(void* arg) {
+		BaseType_t higherPriorityTaskWoken = pdFALSE;
 
-		xSemaphoreGiveFromISR(_DIO1PinSemaphore, &xHigherPriorityTaskWoken);
+		xSemaphoreGiveFromISR(static_cast<SX1262*>(arg)->_DIO1PinSemaphore, &higherPriorityTaskWoken);
 
-		if (xHigherPriorityTaskWoken) {
+		if (higherPriorityTaskWoken)
 			portYIELD_FROM_ISR();
-		}
 	}
 
 	SX1262Error SX1262::waitForBusyPin(const uint32_t timeoutMs) const {

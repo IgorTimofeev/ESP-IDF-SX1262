@@ -230,13 +230,14 @@ namespace YOBA {
 			bool getBusyPinLevel() const;
 			bool getDIO1PinLevel() const;
 
+
 			// -------------------------------- Interrupts --------------------------------
 
-			SemaphoreHandle_t _busyPinSemaphore {};
-			SemaphoreHandle_t _DIO1PinSemaphore {};
+			SemaphoreHandle_t _busyPinSemaphore = nullptr;
+			SemaphoreHandle_t _DIO1PinSemaphore = nullptr;
 
-			IRAM_ATTR void onBusyPinInterrupt() const;
-			IRAM_ATTR void onDIO1PinInterrupt() const;
+			static IRAM_ATTR void onBusyPinInterrupt(void* arg);
+			static IRAM_ATTR void onDIO1PinInterrupt(void* arg);
 
 			SX1262Error waitForBusyPin(const uint32_t timeoutMs = 1'000) const;
 
