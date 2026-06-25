@@ -81,7 +81,7 @@ namespace YOBA {
 
 		// -------------------------------- Interrupts --------------------------------
 
-		gpio_install_isr_service(ESP_INTR_FLAG_IRAM);
+		gpio_install_isr_service(0);
 
 		// Busy
 		_busyPinSemaphore = xSemaphoreCreateBinary();
