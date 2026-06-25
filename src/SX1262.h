@@ -16,8 +16,8 @@
 #include <driver/gpio.h>
 #include <driver/spi_master.h>
 
-namespace SX1262 {
-	enum class error {
+namespace YOBA {
+	enum class SX1262Error {
 		none,
 		invalidChip,
 		SPITransaction,
@@ -27,9 +27,9 @@ namespace SX1262 {
 		invalidChecksum
 	};
 
-	void errorToString(const error error, const std::span<char> str);
+	void errorToString(const SX1262Error error, const std::span<char> str);
 
-	enum class LoRaCodingRate : uint8_t {
+	enum class SX1262LoRaCodingRate : uint8_t {
 		cr4_5,                // 4/5
 		cr4_6,                // 4/6
 		cr4_7,                // 4/7
@@ -40,7 +40,7 @@ namespace SX1262 {
 		cr4_8LongInterleaver, // 4/8, long interleaver
 	};
 
-	enum class LoRaBandwidth : uint8_t {
+	enum class SX1262LoRaBandwidth : uint8_t {
 		bw7_81,  // 7.81 kHz
 		bw10_42, // 10.42 kHz
 		bw15_63, // 15.63 kHz
@@ -53,23 +53,21 @@ namespace SX1262 {
 		bw500_0, // 500.0 kHz
 	};
 
-	class Transceiver {
+	class SX1262 {
 		public:
-			Transceiver(
+			SX1262Error setup(
 				const gpio_num_t SSPin,
 				const gpio_num_t busyPin,
 				const gpio_num_t DIO1Pin,
-				const gpio_num_t RSTPin = GPIO_NUM_NC
-			);
+				const gpio_num_t RSTPin,
 
-			error setup(
 				const spi_host_device_t SPIHostDevice,
 				const uint32_t SPIFrequencyHz,
 
 				const uint32_t frequencyHz,
-				const LoRaBandwidth bandwidth,
+				const SX1262LoRaBandwidth bandwidth,
 				const uint8_t spreadingFactor,
-				const LoRaCodingRate codingRate,
+				const SX1262LoRaCodingRate codingRate,
 				const uint8_t syncWord,
 				const uint16_t preambleLength,
 
@@ -78,9 +76,9 @@ namespace SX1262 {
 				const bool useLDORegulator
 			);
 
-			error reset();
+			SX1262Error reset();
 			void setSPIMutex(const SemaphoreHandle_t mutex);
-			error validateChip();
+			SX1262Error validateChip();
 
 			/*!
 			  \brief Perform image rejection calibration for the specified frequency.
@@ -89,10 +87,10 @@ namespace SX1262 {
 			  \param frequencyHz Frequency to perform the calibration for.
 			  \returns \ref status_codes
 			*/
-			error calibrateImage(const uint32_t frequencyHz);
-			error setRFFrequency(const uint32_t frequencyHz);
-			error setStandby(const uint8_t value = STANDBY_RC);
-			error setSymbNumTimeout(const uint8_t value);
+			SX1262Error calibrateImage(const uint32_t frequencyHz);
+			SX1262Error setRFFrequency(const uint32_t frequencyHz);
+			SX1262Error setStandby(const uint8_t value = STANDBY_RC);
+			SX1262Error setSymbNumTimeout(const uint8_t value);
 
 			// Allowed timeout values:
 			//
@@ -100,20 +98,20 @@ namespace SX1262 {
 			// | RX_TIMEOUT_NONE (0)         | RX single mode |
 			// | RX_TIMEOUT_INF (0xFFFFFF)   | RX continuous mode |
 			// | others                      | RX with timeout |
-			error setRX(const uint32_t timeoutUs = RX_TIMEOUT_NONE);
-			error setTX(const uint32_t timeoutUs = 0);
-			error setRXTXFallbackMode(const uint8_t value = RX_TX_FALLBACK_MODE_STDBY_RC);
+			SX1262Error setRX(const uint32_t timeoutUs = RX_TIMEOUT_NONE);
+			SX1262Error setTX(const uint32_t timeoutUs = 0);
+			SX1262Error setRXTXFallbackMode(const uint8_t value = RX_TX_FALLBACK_MODE_STDBY_RC);
 			// Depends on spreading factor
-			error setLoRaCADParams();
-			error setBufferBaseAddress(const uint8_t rxAddress = 0x00, const uint8_t txAddress = 0x00);
-			error getStatus(uint8_t& status);
-			error getPacketType(uint8_t& packetType);
-			error setPacketType(const uint8_t packetType);
-			error setRegulatorMode(const uint8_t mode);
-			error getIRQStatus(uint16_t& status);
-			error clearIRQStatus(const uint16_t status = IRQ_ALL);
-			error setDIOIRQParams(const uint16_t irqMask = IRQ_NONE, const uint16_t dio1Mask = IRQ_NONE, const uint16_t dio2Mask = IRQ_NONE, const uint16_t dio3Mask = IRQ_NONE);
-			error calibrate(const uint8_t value);
+			SX1262Error setLoRaCADParams();
+			SX1262Error setBufferBaseAddress(const uint8_t rxAddress = 0x00, const uint8_t txAddress = 0x00);
+			SX1262Error getStatus(uint8_t& status);
+			SX1262Error getPacketType(uint8_t& packetType);
+			SX1262Error setPacketType(const uint8_t packetType);
+			SX1262Error setRegulatorMode(const uint8_t mode);
+			SX1262Error getIRQStatus(uint16_t& status);
+			SX1262Error clearIRQStatus(const uint16_t status = IRQ_ALL);
+			SX1262Error setDIOIRQParams(const uint16_t irqMask = IRQ_NONE, const uint16_t dio1Mask = IRQ_NONE, const uint16_t dio2Mask = IRQ_NONE, const uint16_t dio3Mask = IRQ_NONE);
+			SX1262Error calibrate(const uint8_t value);
 
 			/*!
 			 \brief Sets LoRa sync word.
@@ -123,32 +121,32 @@ namespace SX1262 {
 
 			 \returns \ref status_codes
 		   */
-			error setLoRaSyncWord(const uint8_t syncWord, const uint8_t controlBits = 0x44);
+			SX1262Error setLoRaSyncWord(const uint8_t syncWord, const uint8_t controlBits = 0x44);
 
 			/*!
 			 \brief Sets current protection limit. Can be set in 2.5 mA steps.
 			 \param currentLimit current protection limit to be set in mA. Allowed values range from 0 to 140.
 			 \returns \ref status_codes
 		   */
-			error setCurrentLimit(const float currentLimit);
+			SX1262Error setCurrentLimit(const float currentLimit);
 
 			/*!
 			  \brief Set DIO2 to function as RF switch (default in Semtech example designs).
 			  \returns \ref status_codes
 			*/
-			error setDio2AsRfSwitch(const bool enable);
+			SX1262Error setDio2AsRfSwitch(const bool enable);
 
-			error setLoRaModulationParams(
+			SX1262Error setLoRaModulationParams(
 				const uint8_t spreadingFactor,
-				const LoRaBandwidth bandwidth,
-				const LoRaCodingRate codingRate,
+				const SX1262LoRaBandwidth bandwidth,
+				const SX1262LoRaCodingRate codingRate,
 				const uint8_t ldrOptimize = false
 			);
 
-			error setTXClampConfig(const bool enable);
-			error setOutputPower(int8_t powerDBm);
+			SX1262Error setTXClampConfig(const bool enable);
+			SX1262Error setOutputPower(int8_t powerDBm);
 
-			error setPacketParams(
+			SX1262Error setPacketParams(
 				const uint16_t preambleLength,
 				const uint8_t headerType,
 				const uint8_t length,
@@ -156,12 +154,12 @@ namespace SX1262 {
 				const uint8_t invertIQ
 			);
 
-			error writeBuffer(const std::span<const uint8_t> data, const uint8_t offset = 0x00);
-			error readBuffer(const std::span<uint8_t> data, const uint8_t offset);
-			error getPacketStatus(uint32_t& status);
-			error getRSSI(float& rssi);
-			error getRSSIInst(float& rssi);
-			error getSNR(float& snr);
+			SX1262Error writeBuffer(const std::span<const uint8_t> data, const uint8_t offset = 0x00);
+			SX1262Error readBuffer(const std::span<uint8_t> data, const uint8_t offset);
+			SX1262Error getPacketStatus(uint32_t& status);
+			SX1262Error getRSSI(float& rssi);
+			SX1262Error getRSSIInst(float& rssi);
+			SX1262Error getSNR(float& snr);
 
 			// -------------------------------- Extensions --------------------------------
 
@@ -174,22 +172,23 @@ namespace SX1262 {
 			  Preamble detector length is adjusted automatically each time this method is called.
 			  \returns \ref status_codes
 			*/
-			error setLoRaPreambleLength(const uint16_t preambleLength);
-			error setLoRaCRC(const bool enabled);
+			SX1262Error setLoRaPreambleLength(const uint16_t preambleLength);
+			SX1262Error setLoRaCRC(const bool enabled);
 
 			/*!
 			 \brief Enable/disable inversion of the I and Q signals
 			 \param enable IQ inversion enabled (true) or disabled (false);
 			 \returns \ref status_codes
 		   */
-			error invertLoRaIQ(const bool enable);
-			error waitForDIO1Semaphore(const uint32_t timeoutUs) const;
-			error transmit(const std::span<const uint8_t> data, uint32_t timeoutUs = 0);
-			error fixImplicitTimeout();
-			error getPacketLength(uint8_t& length, uint8_t& offset);
-			error finishReceive();
-			error receive(uint8_t* buffer, uint8_t& receivedLength, uint32_t timeoutUs = 0);
-			error fixLoRaTXModulationBeforeTransmission();
+			SX1262Error invertLoRaIQ(const bool enable);
+			SX1262Error waitForDIO1Semaphore(const uint32_t timeoutUs) const;
+			SX1262Error transmit(const std::span<const uint8_t> data, uint32_t timeoutUs = 0);
+			SX1262Error fixImplicitTimeout();
+			SX1262Error getReceivedPacketLength(uint8_t& length, uint8_t& offset);
+			SX1262Error finishReceive();
+			SX1262Error receive(uint8_t* buffer, uint8_t& receivedLength, uint32_t timeoutUs = 0);
+			SX1262Error fixLoRaTXModulationBeforeTransmission();
+			SX1262Error setPacketLength(const uint8_t packetLength);
 
 			/*!
  \brief Set the PA (power amplifier) configuration. Allows user to optimize PA for a specific output power
@@ -202,28 +201,29 @@ namespace SX1262 {
  \param paLut paLut PA lookup table raw value.
  \returns \ref status_codes
 */
-			error setPAConfig(const uint8_t paDutyCycle = 0x04, const uint8_t deviceSel = PA_CONFIG_SX1262, const uint8_t hpMax = PA_CONFIG_HP_MAX, const uint8_t paLut = PA_CONFIG_PA_LUT);
-			error setTXParams(const int8_t power, const uint8_t rampTime);
+			SX1262Error setPAConfig(const uint8_t paDutyCycle = 0x04, const uint8_t deviceSel = PA_CONFIG_SX1262, const uint8_t hpMax = PA_CONFIG_HP_MAX, const uint8_t paLut = PA_CONFIG_PA_LUT);
+			SX1262Error setTXParams(const int8_t power, const uint8_t rampTime);
 
 		private:
 			constexpr static auto _logTag = "SX1262";
 
 			uint32_t _frequencyHz = 0;
 			uint8_t _LoRaSpreadingFactor = 7;
-			LoRaCodingRate _LoRaCodingRate = LoRaCodingRate::cr4_5;
-			LoRaBandwidth _LoRaBandwidth = LoRaBandwidth::bw500_0;
+			SX1262LoRaCodingRate _LoRaCodingRate = SX1262LoRaCodingRate::cr4_5;
+			SX1262LoRaBandwidth _LoRaBandwidth = SX1262LoRaBandwidth::bw500_0;
 			uint16_t _preambleLength = 0;
 			uint8_t _crcType = LORA_CRC_ON;
 			uint8_t _headerType = LORA_HEADER_EXPLICIT;
 			uint8_t _packetType = PACKET_TYPE_LORA;
 			uint8_t _invertIQ = LORA_IQ_STANDARD;
+			uint8_t _packetLength = 255;
 
 			// -------------------------------- GPIO --------------------------------
 
-			gpio_num_t _SSPin;
-			gpio_num_t _busyPin;
-			gpio_num_t _DIO1Pin;
-			gpio_num_t _RSTPin;
+			gpio_num_t _SSPin = GPIO_NUM_NC;
+			gpio_num_t _busyPin = GPIO_NUM_NC;
+			gpio_num_t _DIO1Pin = GPIO_NUM_NC;
+			gpio_num_t _RSTPin = GPIO_NUM_NC;
 
 			void setSSPinLevel(const bool value) const;
 			void setRSTPinLevel(const bool value) const;
@@ -238,7 +238,7 @@ namespace SX1262 {
 			IRAM_ATTR void onBusyPinInterrupt() const;
 			IRAM_ATTR void onDIO1PinInterrupt() const;
 
-			error waitForBusyPin(const uint32_t timeoutMs = 1'000) const;
+			SX1262Error waitForBusyPin(const uint32_t timeoutMs = 1'000) const;
 
 			// -------------------------------- SPI --------------------------------
 
@@ -249,24 +249,24 @@ namespace SX1262 {
 			uint8_t _SPIBuffer[_SPIBufferLength] {};
 
 			bool SPITransmit(spi_transaction_t* t) const;
-			error SPIReadCommand(const uint8_t command, const std::span<uint8_t> data);
-			error SPIReadRegister(const uint16_t reg, const std::span<uint8_t> data);
-			error SPIWrite(const uint8_t* data, const uint16_t length);
-			error SPIWriteCommandAndUint8(const uint8_t command, const uint8_t data);
-			error SPIWriteRegister(const uint16_t reg, const std::span<const uint8_t> data);
-			error SPIWriteBuffer(const uint16_t totalLength) const;
+			SX1262Error SPIReadCommand(const uint8_t command, const std::span<uint8_t> data);
+			SX1262Error SPIReadRegister(const uint16_t reg, const std::span<uint8_t> data);
+			SX1262Error SPIWrite(const uint8_t* data, const uint16_t length);
+			SX1262Error SPIWriteCommandAndUint8(const uint8_t command, const uint8_t data);
+			SX1262Error SPIWriteRegister(const uint16_t reg, const std::span<const uint8_t> data);
+			SX1262Error SPIWriteBuffer(const uint16_t totalLength) const;
 
 			// -------------------------------- Auxiliary --------------------------------
 
 			static bool checkESPError(const esp_err_t error);
-			error checkForLoRaPacketType();
+			SX1262Error checkForLoRaPacketType();
 			static void delayMs(const uint32_t ms);
-			error setRXOrTX(const uint8_t command, const uint32_t timeoutUs);
-			error fixInvertedIQ(const uint8_t iqConfig);
+			SX1262Error setRXOrTX(const uint8_t command, const uint32_t timeoutUs);
+			SX1262Error fixInvertedIQ(const uint8_t iqConfig);
 
 			static float getRSSIFromPacketStatus(const uint32_t packetStatus);
 			static float getSNRFromPacketStatus(const uint32_t packetStatus);
-			error updatePacketParams(const uint8_t length = IMPLICIT_PACKET_LENGTH);
+			SX1262Error updatePacketParams();
 
 		public:
 			
@@ -274,8 +274,8 @@ namespace SX1262 {
 			
 			constexpr static uint32_t RF_XTAL_FREQUENCY_HZ = 32'000'000;
 			constexpr static uint32_t RF_DIVIDER = 1ULL << 25;
-			constexpr static uint8_t IMPLICIT_PACKET_LENGTH = 255;
-			
+			constexpr static uint8_t MAX_PACKET_LENGTH = 255;
+
 			// -------------------------------- Commands --------------------------------
 			
 			// Operational modes commands

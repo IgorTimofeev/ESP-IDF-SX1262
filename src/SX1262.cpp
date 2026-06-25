@@ -13,50 +13,46 @@
 #include <esp_timer.h>
 #include <esp_log.h>
 
-namespace SX1262 {
-	void errorToString(const error error, const std::span<char> str) {
+namespace YOBA {
+	void errorToString(const SX1262Error error, const std::span<char> str) {
 		switch (error) {
-			case error::none:
+			case SX1262Error::none:
 				std::strncpy(str.data(), "none", str.size());
 				break;
-			case error::invalidChip:
+			case SX1262Error::invalidChip:
 				std::strncpy(str.data(), "invalid chip", str.size());
 				break;
-			case error::SPITransaction:
+			case SX1262Error::SPITransaction:
 				std::strncpy(str.data(), "SPI transaction", str.size());
 				break;
-			case error::timeout:
+			case SX1262Error::timeout:
 				std::strncpy(str.data(), "timeout", str.size());
 				break;
-			case error::invalidArgument:
+			case SX1262Error::invalidArgument:
 				std::strncpy(str.data(), "invalid argument", str.size());
 				break;
-			case error::invalidPacketType:
+			case SX1262Error::invalidPacketType:
 				std::strncpy(str.data(), "invalid packet type", str.size());
 				break;
-			case error::invalidChecksum:
+			case SX1262Error::invalidChecksum:
 				std::strncpy(str.data(), "invalid checksum", str.size());
 				break;
 		}
 	}
 
-	Transceiver::Transceiver(const gpio_num_t SSPin, const gpio_num_t busyPin, const gpio_num_t DIO1Pin, const gpio_num_t RSTPin):
-		_SSPin(SSPin),
-		_busyPin(busyPin),
-		_DIO1Pin(DIO1Pin),
-		_RSTPin(RSTPin)
-	{
+	SX1262Error SX1262::setup(
+		const gpio_num_t SSPin,
+		const gpio_num_t busyPin,
+		const gpio_num_t DIO1Pin,
+		const gpio_num_t RSTPin,
 
-	}
-
-	error Transceiver::setup(
 		const spi_host_device_t SPIHostDevice,
 		const uint32_t SPIFrequencyHz,
 
 		const uint32_t frequencyHz,
-		const LoRaBandwidth bandwidth,
+		const SX1262LoRaBandwidth bandwidth,
 		const uint8_t spreadingFactor,
-		const LoRaCodingRate codingRate,
+		const SX1262LoRaCodingRate codingRate,
 		const uint8_t syncWord,
 		const uint16_t preambleLength,
 
@@ -64,6 +60,10 @@ namespace SX1262 {
 		const int8_t powerDBm,
 		const bool useLDORegulator
 	) {
+		_SSPin = SSPin;
+		_busyPin = busyPin;
+		_DIO1Pin = DIO1Pin;
+		_RSTPin = RSTPin;
 
 		// -------------------------------- GPIO output --------------------------------
 
@@ -115,7 +115,7 @@ namespace SX1262 {
 		gpio_isr_handler_add(
 			_busyPin,
 			[](void* arg) {
-				static_cast<Transceiver*>(arg)->onBusyPinInterrupt();
+				static_cast<SX1262*>(arg)->onBusyPinInterrupt();
 			},
 			this
 		);
@@ -126,7 +126,7 @@ namespace SX1262 {
 		gpio_isr_handler_add(
 			_DIO1Pin,
 			[](void* arg) {
-				static_cast<Transceiver*>(arg)->onDIO1PinInterrupt();
+				static_cast<SX1262*>(arg)->onDIO1PinInterrupt();
 			},
 			this
 		);
@@ -143,16 +143,16 @@ namespace SX1262 {
 		const auto ESPError = spi_bus_add_device(SPIHostDevice, &SPIInterfaceConfig, &_SPIDevice);
 
 		if (!checkESPError(ESPError))
-			return error::SPITransaction;
+			return SX1262Error::SPITransaction;
 
 		// -------------------------------- Initialization sequence --------------------------------
 
 		auto error = reset();
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = validateChip();
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		// TCXO configuration should be here
@@ -161,60 +161,60 @@ namespace SX1262 {
 		//				}
 
 		error = setBufferBaseAddress(0x00, 0x00);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = setPacketType(PACKET_TYPE_LORA);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = setRXTXFallbackMode(RX_TX_FALLBACK_MODE_FS);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = clearIRQStatus();
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = setDIOIRQParams();
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = calibrate(CALIBRATE_ALL);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		// Wait for calibration completion end. Normally this should take 3.5 ms
 		error = waitForBusyPin(1'000);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = setRegulatorMode(useLDORegulator ? REGULATOR_LDO : REGULATOR_DC_DC);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = setCurrentLimit(currentLimitMA);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = setDio2AsRfSwitch(true);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = setLoRaSyncWord(syncWord);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = setLoRaPreambleLength(preambleLength);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = setLoRaCRC(true);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = invertLoRaIQ(false);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = setLoRaModulationParams(
@@ -224,29 +224,29 @@ namespace SX1262 {
 			false
 		);
 
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = setLoRaCADParams();
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = setRFFrequency(frequencyHz);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = setTXClampConfig(true);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = setOutputPower(powerDBm);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
-		return error::none;
+		return SX1262Error::none;
 	}
 
-	error Transceiver::reset() {
+	SX1262Error SX1262::reset() {
 		// Toggling RST GPIO
 		if (_RSTPin != GPIO_NUM_NC) {
 			setRSTPinLevel(false);
@@ -259,8 +259,8 @@ namespace SX1262 {
 		const auto start = esp_timer_get_time();
 
 		while (true) {
-			if (setStandby() == error::none)
-				return error::none;
+			if (setStandby() == SX1262Error::none)
+				return SX1262Error::none;
 
 			// standby command failed, check timeout and try again
 			if (esp_timer_get_time() - start >= 1'000'000) {
@@ -272,20 +272,20 @@ namespace SX1262 {
 			delayMs(10);
 		}
 
-		return error::timeout;
+		return SX1262Error::timeout;
 	}
 
-	void Transceiver::setSPIMutex(const SemaphoreHandle_t mutex) {
+	void SX1262::setSPIMutex(const SemaphoreHandle_t mutex) {
 		_SPIMutex = mutex;
 	}
 
-	error Transceiver::validateChip() {
+	SX1262Error SX1262::validateChip() {
 		for (uint8_t i = 0; i < 10; ++i) {
 			uint8_t buffer[16] {};
 			SPIReadRegister(REG_VERSION_STRING, { buffer, 16 });
 
 			if (strncmp(VERSION_STRING, reinterpret_cast<char*>(buffer), 6) == 0)
-				return error::none;
+				return SX1262Error::none;
 
 			ESP_LOGE(_logTag, "failed to validate chip: version mismatch, attempt is %d, value is %s", i, buffer);
 
@@ -294,10 +294,10 @@ namespace SX1262 {
 
 		ESP_LOGE(_logTag, "failed to validate chip: maximum attempts exceeded");
 
-		return error::invalidChip;
+		return SX1262Error::invalidChip;
 	}
 
-	error Transceiver::calibrateImage(const uint32_t frequencyHz) {
+	SX1262Error SX1262::calibrateImage(const uint32_t frequencyHz) {
 		uint8_t data[3] {
 			CMD_CALIBRATE_IMAGE,
 			0,
@@ -329,18 +329,18 @@ namespace SX1262 {
 		return SPIWrite(data, 3);
 	}
 
-	error Transceiver::setRFFrequency(const uint32_t frequencyHz) {
+	SX1262Error SX1262::setRFFrequency(const uint32_t frequencyHz) {
 		if (frequencyHz < 120'000'000 || frequencyHz > 960'000'000) {
 			ESP_LOGE(_logTag, "failed to set frequency: value %d is out of range [120; 960]");
 
-			return error::invalidArgument;
+			return SX1262Error::invalidArgument;
 		}
 
 		// Check if we need to recalibrate image
 		if (std::abs(static_cast<int64_t>(frequencyHz) - static_cast<int64_t>(_frequencyHz)) >= static_cast<int64_t>(CAL_IMG_FREQ_TRIG_HZ)) {
 			const auto error = calibrateImage(frequencyHz);
 
-			if (error != error::none)
+			if (error != SX1262Error::none)
 				return error;
 		}
 
@@ -373,27 +373,27 @@ namespace SX1262 {
 		return SPIWrite(data, 5);
 	}
 
-	error Transceiver::setStandby(const uint8_t value) {
+	SX1262Error SX1262::setStandby(const uint8_t value) {
 		return SPIWriteCommandAndUint8(CMD_SET_STANDBY, value);
 	}
 
-	error Transceiver::setSymbNumTimeout(const uint8_t value) {
+	SX1262Error SX1262::setSymbNumTimeout(const uint8_t value) {
 		return SPIWriteCommandAndUint8(CMD_SET_LORA_SYMB_NUM_TIMEOUT, value);
 	}
 
-	error Transceiver::setRX(const uint32_t timeoutUs) {
+	SX1262Error SX1262::setRX(const uint32_t timeoutUs) {
 		return setRXOrTX(CMD_SET_RX, timeoutUs);
 	}
 
-	error Transceiver::setTX(const uint32_t timeoutUs) {
+	SX1262Error SX1262::setTX(const uint32_t timeoutUs) {
 		return setRXOrTX(CMD_SET_TX, timeoutUs);
 	}
 
-	error Transceiver::setRXTXFallbackMode(const uint8_t value) {
+	SX1262Error SX1262::setRXTXFallbackMode(const uint8_t value) {
 		return SPIWriteCommandAndUint8(CMD_SET_RX_TX_FALLBACK_MODE, value);
 	}
 
-	error Transceiver::setLoRaCADParams() {
+	SX1262Error SX1262::setLoRaCADParams() {
 		const uint8_t data[] {
 			CMD_SET_CAD_PARAMS,
 			CAD_ON_8_SYMB,
@@ -408,7 +408,7 @@ namespace SX1262 {
 		return SPIWrite(data, 8);
 	}
 
-	error Transceiver::setBufferBaseAddress(const uint8_t rxAddress, const uint8_t txAddress) {
+	SX1262Error SX1262::setBufferBaseAddress(const uint8_t rxAddress, const uint8_t txAddress) {
 		const uint8_t data[] {
 			CMD_SET_BUFFER_BASE_ADDRESS,
 			rxAddress,
@@ -418,28 +418,28 @@ namespace SX1262 {
 		return SPIWrite(data, 3);
 	}
 
-	error Transceiver::getStatus(uint8_t& status) {
+	SX1262Error SX1262::getStatus(uint8_t& status) {
 		return SPIReadCommand(CMD_GET_STATUS, { &status, 1 });
 	}
 
-	error Transceiver::getPacketType(uint8_t& packetType) {
+	SX1262Error SX1262::getPacketType(uint8_t& packetType) {
 		return SPIReadCommand(CMD_GET_PACKET_TYPE, { &packetType, 1 });
 	}
 
-	error Transceiver::setPacketType(const uint8_t packetType) {
+	SX1262Error SX1262::setPacketType(const uint8_t packetType) {
 		return SPIWriteCommandAndUint8(CMD_SET_PACKET_TYPE, packetType);
 	}
 
-	error Transceiver::setRegulatorMode(const uint8_t mode) {
+	SX1262Error SX1262::setRegulatorMode(const uint8_t mode) {
 		return SPIWriteCommandAndUint8(CMD_SET_REGULATOR_MODE, mode);
 	}
 
-	error Transceiver::getIRQStatus(uint16_t& status) {
+	SX1262Error SX1262::getIRQStatus(uint16_t& status) {
 		status = 0;
 
 		const auto error = SPIReadCommand(CMD_GET_IRQ_STATUS, { reinterpret_cast<uint8_t*>(&status), 2 });
 
-		if (error != error::none) {
+		if (error != SX1262Error::none) {
 			ESP_LOGE(_logTag, "failed to get IRQ status");
 
 			return error;
@@ -447,10 +447,10 @@ namespace SX1262 {
 
 		status = ((status & 0xFF) << 8) | ((status >> 8) & 0xFF);
 
-		return error::none;
+		return SX1262Error::none;
 	}
 
-	error Transceiver::clearIRQStatus(const uint16_t status) {
+	SX1262Error SX1262::clearIRQStatus(const uint16_t status) {
 		const uint8_t data[] {
 			CMD_CLEAR_IRQ_STATUS,
 			static_cast<uint8_t>((status >> 8) & 0xFF),
@@ -460,7 +460,7 @@ namespace SX1262 {
 		return SPIWrite(data, 3);
 	}
 
-	error Transceiver::setDIOIRQParams(const uint16_t irqMask, const uint16_t dio1Mask, const uint16_t dio2Mask, const uint16_t dio3Mask) {
+	SX1262Error SX1262::setDIOIRQParams(const uint16_t irqMask, const uint16_t dio1Mask, const uint16_t dio2Mask, const uint16_t dio3Mask) {
 		const uint8_t data[] {
 			CMD_SET_DIO_IRQ_PARAMS,
 
@@ -480,11 +480,11 @@ namespace SX1262 {
 		return SPIWrite(data, 9);
 	}
 
-	error Transceiver::calibrate(const uint8_t value) {
+	SX1262Error SX1262::calibrate(const uint8_t value) {
 		return SPIWriteCommandAndUint8(CMD_CALIBRATE, value);
 	}
 
-	error Transceiver::setLoRaSyncWord(const uint8_t syncWord, const uint8_t controlBits) {
+	SX1262Error SX1262::setLoRaSyncWord(const uint8_t syncWord, const uint8_t controlBits) {
 		const uint8_t data[] {
 			static_cast<uint8_t>((syncWord & 0xF0) | ((controlBits & 0xF0) >> 4)),
 			static_cast<uint8_t>(((syncWord & 0x0F) << 4) | (controlBits & 0x0F))
@@ -493,11 +493,11 @@ namespace SX1262 {
 		return SPIWriteRegister(REG_LORA_SYNC_WORD_MSB, { data, 2 });
 	}
 
-	error Transceiver::setCurrentLimit(const float currentLimit) {
+	SX1262Error SX1262::setCurrentLimit(const float currentLimit) {
 		// check allowed range
 		if (currentLimit < 0 || currentLimit > 140) {
 			ESP_LOGE(_logTag, "failed to set current limit: value %f is out of range [0; 140]", currentLimit);
-			return error::invalidArgument;
+			return SX1262Error::invalidArgument;
 		}
 
 		// calculate raw value
@@ -506,14 +506,14 @@ namespace SX1262 {
 		return SPIWriteRegister(REG_OCP_CONFIGURATION, { &rawLimit, 1 });
 	}
 
-	error Transceiver::setDio2AsRfSwitch(const bool enable) {
+	SX1262Error SX1262::setDio2AsRfSwitch(const bool enable) {
 		return SPIWriteCommandAndUint8(CMD_SET_DIO2_AS_RF_SWITCH_CTRL, enable ? DIO2_AS_RF_SWITCH : DIO2_AS_IRQ);
 	}
 
-	error Transceiver::setLoRaModulationParams(const uint8_t spreadingFactor, const LoRaBandwidth bandwidth, const LoRaCodingRate codingRate, const uint8_t ldrOptimize) {
+	SX1262Error SX1262::setLoRaModulationParams(const uint8_t spreadingFactor, const SX1262LoRaBandwidth bandwidth, const SX1262LoRaCodingRate codingRate, const uint8_t ldrOptimize) {
 		if (spreadingFactor < 5 || spreadingFactor > 12) {
 			ESP_LOGE(_logTag, "failed to set modulation params: spreading factor %d is out of range [5; 12]", spreadingFactor);
-			return error::invalidArgument;
+			return SX1262Error::invalidArgument;
 		}
 
 		_LoRaSpreadingFactor = spreadingFactor;
@@ -523,16 +523,16 @@ namespace SX1262 {
 		uint8_t bwRegVal = 0;
 
 		switch (_LoRaBandwidth) {
-			case LoRaBandwidth::bw7_81: bwRegVal = 0x00; break;
-			case LoRaBandwidth::bw10_42: bwRegVal = 0x08; break;
-			case LoRaBandwidth::bw15_63: bwRegVal = 0x01; break;
-			case LoRaBandwidth::bw20_83: bwRegVal = 0x09; break;
-			case LoRaBandwidth::bw31_25: bwRegVal = 0x02; break;
-			case LoRaBandwidth::bw41_67: bwRegVal = 0x0A; break;
-			case LoRaBandwidth::bw62_5: bwRegVal = 0x03; break;
-			case LoRaBandwidth::bw125_0: bwRegVal = 0x04; break;
-			case LoRaBandwidth::bw250_0: bwRegVal = 0x05; break;
-			case LoRaBandwidth::bw500_0: bwRegVal = 0x06; break;
+			case SX1262LoRaBandwidth::bw7_81: bwRegVal = 0x00; break;
+			case SX1262LoRaBandwidth::bw10_42: bwRegVal = 0x08; break;
+			case SX1262LoRaBandwidth::bw15_63: bwRegVal = 0x01; break;
+			case SX1262LoRaBandwidth::bw20_83: bwRegVal = 0x09; break;
+			case SX1262LoRaBandwidth::bw31_25: bwRegVal = 0x02; break;
+			case SX1262LoRaBandwidth::bw41_67: bwRegVal = 0x0A; break;
+			case SX1262LoRaBandwidth::bw62_5: bwRegVal = 0x03; break;
+			case SX1262LoRaBandwidth::bw125_0: bwRegVal = 0x04; break;
+			case SX1262LoRaBandwidth::bw250_0: bwRegVal = 0x05; break;
+			case SX1262LoRaBandwidth::bw500_0: bwRegVal = 0x06; break;
 		}
 
 		// Coding rate
@@ -540,13 +540,13 @@ namespace SX1262 {
 		uint8_t crRegVal = 0;
 
 		switch (_LoRaCodingRate) {
-			case LoRaCodingRate::cr4_5: crRegVal = 0x01; break;
-			case LoRaCodingRate::cr4_6: crRegVal = 0x02; break;
-			case LoRaCodingRate::cr4_7: crRegVal = 0x03; break;
-			case LoRaCodingRate::cr4_8: crRegVal = 0x04; break;
-			case LoRaCodingRate::cr4_5LongInterleaver: crRegVal = 0x05; break;
-			case LoRaCodingRate::cr4_6LongInterleaver: crRegVal = 0x06; break;
-			case LoRaCodingRate::cr4_8LongInterleaver: crRegVal = 0x07; break;
+			case SX1262LoRaCodingRate::cr4_5: crRegVal = 0x01; break;
+			case SX1262LoRaCodingRate::cr4_6: crRegVal = 0x02; break;
+			case SX1262LoRaCodingRate::cr4_7: crRegVal = 0x03; break;
+			case SX1262LoRaCodingRate::cr4_8: crRegVal = 0x04; break;
+			case SX1262LoRaCodingRate::cr4_5LongInterleaver: crRegVal = 0x05; break;
+			case SX1262LoRaCodingRate::cr4_6LongInterleaver: crRegVal = 0x06; break;
+			case SX1262LoRaCodingRate::cr4_8LongInterleaver: crRegVal = 0x07; break;
 		}
 
 		const uint8_t data[5] {
@@ -560,7 +560,7 @@ namespace SX1262 {
 		return SPIWrite(data, 5);
 	}
 
-	error Transceiver::setTXClampConfig(const bool enable) {
+	SX1262Error SX1262::setTXClampConfig(const bool enable) {
 		// fixes overly eager PA clamping
 		// see SX1262/SX1268 datasheet, chapter 15 Known Limitations, section 15.2 for details
 
@@ -568,7 +568,7 @@ namespace SX1262 {
 
 		const auto error = SPIReadRegister(REG_TX_CLAMP_CONFIG, { &clampConfig, 1 });
 
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		// apply or undo workaround
@@ -582,13 +582,13 @@ namespace SX1262 {
 		return SPIWriteRegister(REG_TX_CLAMP_CONFIG, { &clampConfig, 1 });
 	}
 
-	error Transceiver::setOutputPower(int8_t powerDBm) {
+	SX1262Error SX1262::setOutputPower(int8_t powerDBm) {
 		// get current OCP configuration
 		uint8_t ocp = 0;
 
 		auto error = SPIReadRegister(REG_OCP_CONFIGURATION, { &ocp, 1 });
 
-		if (error != error::none) {
+		if (error != SX1262Error::none) {
 			ESP_LOGE(_logTag, "set output power failed: unable to receive OCP configuration");
 			return error;
 		}
@@ -596,7 +596,7 @@ namespace SX1262 {
 		// set PA config
 		error = setPAConfig();
 
-		if (error != error::none) {
+		if (error != SX1262Error::none) {
 			ESP_LOGE(_logTag, "set output power failed: unable to set PA config");
 			return error;
 		}
@@ -604,7 +604,7 @@ namespace SX1262 {
 		// set output power with default 200us ramp
 		error = setTXParams(powerDBm, PA_RAMP_200U);
 
-		if (error != error::none) {
+		if (error != SX1262Error::none) {
 			ESP_LOGE(_logTag, "set output power failed: unable to set TX params");
 			return error;
 		}
@@ -613,10 +613,10 @@ namespace SX1262 {
 		return SPIWriteRegister(REG_OCP_CONFIGURATION, { &ocp, 1 });
 	}
 
-	error Transceiver::setPacketParams(const uint16_t preambleLength, const uint8_t headerType, const uint8_t length, const uint8_t crcType, const uint8_t invertIQ) {
+	SX1262Error SX1262::setPacketParams(const uint16_t preambleLength, const uint8_t headerType, const uint8_t length, const uint8_t crcType, const uint8_t invertIQ) {
 		const auto error = fixInvertedIQ(invertIQ);
 
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		const uint8_t data[7] {
@@ -632,7 +632,7 @@ namespace SX1262 {
 		return SPIWrite(data, 7);
 	}
 
-	error Transceiver::writeBuffer(const std::span<const uint8_t> data, const uint8_t offset) {
+	SX1262Error SX1262::writeBuffer(const std::span<const uint8_t> data, const uint8_t offset) {
 		_SPIBuffer[0] = CMD_WRITE_BUFFER;
 		_SPIBuffer[1] = offset;
 
@@ -641,9 +641,9 @@ namespace SX1262 {
 		return SPIWriteBuffer(2 + data.size());
 	}
 
-	error Transceiver::readBuffer(const std::span<uint8_t> data, const uint8_t offset) {
-		if (waitForBusyPin() == error::timeout)
-			return error::timeout;
+	SX1262Error SX1262::readBuffer(const std::span<uint8_t> data, const uint8_t offset) {
+		if (waitForBusyPin() == SX1262Error::timeout)
+			return SX1262Error::timeout;
 
 		_SPIBuffer[0] = CMD_READ_BUFFER; // W: command | R: status
 		_SPIBuffer[1] = offset;          // W: offset  | R: status
@@ -664,77 +664,77 @@ namespace SX1262 {
 			//				for (int i = 0; i < 3 + length; ++i) {
 			//					ESP_LOGI(_logTag, "readBuffer buffer[%d]: %d", i, _SPIBuffer[i]);
 			//				}
-			return error::none;
+			return SX1262Error::none;
 		}
 
-		return error::SPITransaction;
+		return SX1262Error::SPITransaction;
 	}
 
-	error Transceiver::getPacketStatus(uint32_t& status) {
+	SX1262Error SX1262::getPacketStatus(uint32_t& status) {
 		uint8_t data[3] {0, 0, 0};
 
 		const auto error = SPIReadCommand(CMD_GET_PACKET_STATUS, { data, 3 });
 
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		status = ((static_cast<uint32_t>(data[0]) << 16) | (static_cast<uint32_t>(data[1]) << 8) | static_cast<uint32_t>(data[2]));
 
-		return error::none;
+		return SX1262Error::none;
 	}
 
-	error Transceiver::getRSSI(float& rssi) {
+	SX1262Error SX1262::getRSSI(float& rssi) {
 		uint32_t packetStatus = 0;
 
 		const auto error = getPacketStatus(packetStatus);
 
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		rssi = getRSSIFromPacketStatus(packetStatus);
 
-		return error::none;
+		return SX1262Error::none;
 	}
 
-	error Transceiver::getRSSIInst(float& rssi) {
+	SX1262Error SX1262::getRSSIInst(float& rssi) {
 		uint8_t rssiRaw = 0;
 
 		const auto error = SPIReadCommand(CMD_GET_RSSI_INST, { &rssiRaw, 1 });
 
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		rssi = static_cast<float>(rssiRaw) / -2.0f;
 
-		return error::none;
+		return SX1262Error::none;
 	}
 
-	error Transceiver::getSNR(float& snr) {
+	SX1262Error SX1262::getSNR(float& snr) {
 		uint32_t packetStatus = 0;
 
 		const auto error = getPacketStatus(packetStatus);
 
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		snr = getSNRFromPacketStatus(packetStatus);
 
-		return error::none;
+		return SX1262Error::none;
 	}
 
-	error Transceiver::setLoRaPreambleLength(const uint16_t preambleLength) {
+	SX1262Error SX1262::setLoRaPreambleLength(const uint16_t preambleLength) {
 		_preambleLength = preambleLength;
 
 		return updatePacketParams();
 	}
 
-	error Transceiver::setLoRaCRC(const bool enabled) {
+	SX1262Error SX1262::setLoRaCRC(const bool enabled) {
 		_crcType = enabled ? LORA_CRC_ON : LORA_CRC_OFF;
 
 		return updatePacketParams();
 	}
 
-	error Transceiver::invertLoRaIQ(const bool enable) {
+	SX1262Error SX1262::invertLoRaIQ(const bool enable) {
 		if (enable) {
 			_invertIQ = LORA_IQ_INVERTED;
 		}
@@ -745,11 +745,11 @@ namespace SX1262 {
 		return updatePacketParams();
 	}
 
-	error Transceiver::waitForDIO1Semaphore(const uint32_t timeoutUs) const {
+	SX1262Error SX1262::waitForDIO1Semaphore(const uint32_t timeoutUs) const {
 		return
 			// Already in high
 			getDIO1PinLevel()
-			? error::none
+			? SX1262Error::none
 			// Wait for high
 			: (
 				xSemaphoreTake(
@@ -760,32 +760,29 @@ namespace SX1262 {
 					// FreeRTOS tasks can handle at least portTICK_PERIOD_MS, also adding 100 ms for пропёрживание
 					: pdMS_TO_TICKS(std::max(timeoutUs / 1000 + 100, portTICK_PERIOD_MS))
 				) == pdTRUE
-				? error::none
-				: error::timeout
+				? SX1262Error::none
+				: SX1262Error::timeout
 			);
 	}
 
-	error Transceiver::transmit(const std::span<const uint8_t> data, uint32_t timeoutUs) {
-		//				if (!setStandby())
-		//					return false;
-
+	SX1262Error SX1262::transmit(const std::span<const uint8_t> data, uint32_t timeoutUs) {
 		// Check packet length
-		if (_LoRaCodingRate > LoRaCodingRate::cr4_8) {
+		if (_LoRaCodingRate > SX1262LoRaCodingRate::cr4_8) {
 			// Long interleaver needs at least 8 bytes
 			if (data.size() < 8) {
 				ESP_LOGE(_logTag, "failed to transmit: packet is too short for long interleaver coding rate");
-				return error::invalidArgument;
+				return SX1262Error::invalidArgument;
 			}
 
 			// Long interleaver supports up to 253 bytes if CRC is enabled
-			if (_crcType == LORA_CRC_ON && data.size() > IMPLICIT_PACKET_LENGTH - 2) {
+			if (_crcType == LORA_CRC_ON && data.size() > MAX_PACKET_LENGTH - 2) {
 				ESP_LOGE(_logTag, "failed to transmit: packet is too long for long interleaver coding rate");
-				return error::invalidArgument;
+				return SX1262Error::invalidArgument;
 			}
 		}
 
-		auto error = updatePacketParams(data.size());
-		if (error != error::none)
+		auto error = setPacketLength(data.size());
+		if (error != SX1262Error::none)
 			return error;
 
 		uint16_t IRQMask = IRQ_TX_DONE;
@@ -794,95 +791,95 @@ namespace SX1262 {
 			IRQMask |= IRQ_TIMEOUT;
 
 		error = setDIOIRQParams(IRQMask, IRQMask);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = setBufferBaseAddress();
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = writeBuffer(data);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = clearIRQStatus();
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		// Important shit
 		error = fixLoRaTXModulationBeforeTransmission();
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		// LET'S FUCKING MOOOOVE
 		error = setTX(timeoutUs);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = waitForDIO1Semaphore(timeoutUs);
 
-		if (error != error::none) {
+		if (error != SX1262Error::none) {
 			ESP_LOGE(_logTag, "failed to transmit: dio1 timeout reached");
 
-			return error::timeout;
+			return SX1262Error::timeout;
 		}
 
 		uint16_t IRQStatus = 0;
 
 		error = getIRQStatus(IRQStatus);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		if (IRQStatus & IRQ_TIMEOUT) {
 			//					ESP_LOGE(_logTag, "failed to transmit: IRQ timeout reached");
 
-			return error::timeout;
+			return SX1262Error::timeout;
 		}
 
-		return error::none;
+		return SX1262Error::none;
 	}
 
-	error Transceiver::fixImplicitTimeout() {
+	SX1262Error SX1262::fixImplicitTimeout() {
 		// fixes timeout in implicit header mode
 		// see SX1262/SX1268 datasheet, chapter 15 Known Limitations, section 15.3 for details
 
 		// check if we're in implicit LoRa mode
 		if (_headerType != LORA_HEADER_IMPLICIT || _packetType != PACKET_TYPE_LORA) {
 			// not in the correct mode, nothing to do here
-			return error::none;
+			return SX1262Error::none;
 		}
 
 		// stop RTC counter
 		constexpr uint8_t rtcStop = 0x00;
 
 		auto error = SPIWriteRegister(REG_RTC_CTRL, { &rtcStop, 1 });
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		// read currently active event
 		uint8_t rtcEvent = 0;
 
 		error = SPIWriteRegister(REG_EVENT_MASK, { &rtcEvent, 1 });
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		// clear events
 		rtcEvent |= 0x02;
 
 		error = SPIWriteRegister(REG_EVENT_MASK, { &rtcEvent, 1 });
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
-		return error::none;
+		return SX1262Error::none;
 	}
 
-	error Transceiver::getPacketLength(uint8_t& length, uint8_t& offset) {
+	SX1262Error SX1262::getReceivedPacketLength(uint8_t& length, uint8_t& offset) {
 		// in implicit mode, return the cached value if the offset was not requested
 		if ((_packetType == PACKET_TYPE_LORA) && (_headerType == LORA_HEADER_IMPLICIT) && (!offset)) {
-			length = IMPLICIT_PACKET_LENGTH;
+			length = _packetLength;
 			offset = 0;
 
-			return error::none;
+			return SX1262Error::none;
 		}
 
 		// if offset was requested, or in explicit mode, we always have to perform the SPI transaction
@@ -892,26 +889,26 @@ namespace SX1262 {
 		};
 
 		const auto error = SPIReadCommand(CMD_GET_RX_BUFFER_STATUS, { data, 2 });
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
-		offset = data[1];
 		length = data[0];
+		offset = data[1];
 
-		return error::none;
+		return SX1262Error::none;
 	}
 
-	error Transceiver::finishReceive() {
+	SX1262Error SX1262::finishReceive() {
 		// try to fix timeout error in implicit header mode
 		// check for modem type and header mode is done in fixImplicitTimeout()
 		const auto error = fixImplicitTimeout();
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		return error;
 	}
 
-	error Transceiver::receive(uint8_t* buffer, uint8_t& receivedLength, uint32_t timeoutUs) {
+	SX1262Error SX1262::receive(uint8_t* buffer, uint8_t& receivedLength, uint32_t timeoutUs) {
 		//				if (!setStandby())
 		//					return false;
 
@@ -921,88 +918,88 @@ namespace SX1262 {
 			IRQMask |= IRQ_TIMEOUT;
 
 		auto error = setDIOIRQParams(IRQMask, IRQMask);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = clearIRQStatus();
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = setBufferBaseAddress();
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
-		error = updatePacketParams();
-		if (error != error::none)
+		error = setPacketLength(255);
+		if (error != SX1262Error::none)
 			return error;
 
 		// LET'S FUCKING MOOOOVE
 		error = setRX(timeoutUs);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = waitForDIO1Semaphore(timeoutUs);
 
-		if (error != error::none) {
+		if (error != SX1262Error::none) {
 			ESP_LOGE(_logTag, "failed to receive: dio1 timeout reached");
 
 			finishReceive();
 
-			return error::timeout;
+			return SX1262Error::timeout;
 		}
 
 		uint16_t IRQStatus = 0;
 
 		error = getIRQStatus(IRQStatus);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		error = finishReceive();
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		if (IRQStatus & IRQ_TIMEOUT) {
 			//					ESP_LOGE(_logTag, "failed to receive: IRQ timeout reached");
 
-			return error::timeout;
+			return SX1262Error::timeout;
 		}
 
 		// check integrity CRC
 		// Report CRC mismatch when there's a payload CRC error, or a header error and no valid header (to avoid false alarm from previous packet)
 		if ((IRQStatus & IRQ_CRC_ERR) || ((IRQStatus & IRQ_HEADER_ERR) && !(IRQStatus & IRQ_HEADER_VALID))) {
 			ESP_LOGE(_logTag, "failed to receive: CRC mismatch");
-			return error::invalidChecksum;
+			return SX1262Error::invalidChecksum;
 		}
 
 		// get packet length and Rx buffer offset
 		uint8_t offset = 0;
 
-		error = getPacketLength(receivedLength, offset);
-		if (error != error::none)
+		error = getReceivedPacketLength(receivedLength, offset);
+		if (error != SX1262Error::none)
 			return error;
 
 		//				ESP_LOGI(_logTag, "receive() length: %d, offset: %d", length, offset);
 
 		// read packet data starting at offset
 		error = readBuffer({ buffer, receivedLength }, offset);
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
-		return error::none;
+		return SX1262Error::none;
 	}
 
-	error Transceiver::fixLoRaTXModulationBeforeTransmission() {
+	SX1262Error SX1262::fixLoRaTXModulationBeforeTransmission() {
 		// fix tx modulation for 500 kHz LoRa
 		// see SX1262/SX1268 datasheet, chapter 15 Known Limitations, section 15.1 for details
 
 		uint8_t txModulation = 0;
 
 		const auto error = SPIReadRegister(REG_TX_MODULATION, { &txModulation, 1 });
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		// fix the value for LoRa with 500 kHz bandwidth
-		if (_packetType == PACKET_TYPE_LORA && _LoRaBandwidth == LoRaBandwidth::bw500_0) {
+		if (_packetType == PACKET_TYPE_LORA && _LoRaBandwidth == SX1262LoRaBandwidth::bw500_0) {
 			txModulation &= 0xFB;
 		}
 		else {
@@ -1012,7 +1009,13 @@ namespace SX1262 {
 		return SPIWriteRegister(REG_TX_MODULATION, { &txModulation, 1 });
 	}
 
-	error Transceiver::setPAConfig(const uint8_t paDutyCycle, const uint8_t deviceSel, const uint8_t hpMax, const uint8_t paLut) {
+	SX1262Error SX1262::setPacketLength(const uint8_t packetLength) {
+		_packetLength = packetLength;
+
+		return updatePacketParams();
+	}
+
+	SX1262Error SX1262::setPAConfig(const uint8_t paDutyCycle, const uint8_t deviceSel, const uint8_t hpMax, const uint8_t paLut) {
 		const uint8_t data[5] {
 			CMD_SET_PA_CONFIG,
 			paDutyCycle,
@@ -1024,10 +1027,10 @@ namespace SX1262 {
 		return SPIWrite(data, 5);
 	}
 
-	error Transceiver::setTXParams(const int8_t power, const uint8_t rampTime) {
+	SX1262Error SX1262::setTXParams(const int8_t power, const uint8_t rampTime) {
 		if (power < -9 || power > 22) {
 			ESP_LOGE(_logTag, "set output power failed: value %d is out of range [-9; 22]", power);
-			return error::invalidArgument;
+			return SX1262Error::invalidArgument;
 		}
 
 		const uint8_t data[] {
@@ -1039,23 +1042,23 @@ namespace SX1262 {
 		return SPIWrite(data, 3);
 	}
 
-	void Transceiver::setSSPinLevel(const bool value) const {
+	void SX1262::setSSPinLevel(const bool value) const {
 		gpio_set_level(_SSPin, value);
 	}
 
-	void Transceiver::setRSTPinLevel(const bool value) const {
+	void SX1262::setRSTPinLevel(const bool value) const {
 		gpio_set_level(_RSTPin, value);
 	}
 
-	bool Transceiver::getBusyPinLevel() const {
+	bool SX1262::getBusyPinLevel() const {
 		return gpio_get_level(_busyPin);
 	}
 
-	bool Transceiver::getDIO1PinLevel() const {
+	bool SX1262::getDIO1PinLevel() const {
 		return gpio_get_level(_DIO1Pin);
 	}
 
-	void Transceiver::onBusyPinInterrupt() const {
+	void SX1262::onBusyPinInterrupt() const {
 		BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
 		xSemaphoreGiveFromISR(_busyPinSemaphore, &xHigherPriorityTaskWoken);
@@ -1065,7 +1068,7 @@ namespace SX1262 {
 		}
 	}
 
-	void Transceiver::onDIO1PinInterrupt() const {
+	void SX1262::onDIO1PinInterrupt() const {
 		BaseType_t xHigherPriorityTaskWoken = pdFALSE;
 
 		xSemaphoreGiveFromISR(_DIO1PinSemaphore, &xHigherPriorityTaskWoken);
@@ -1075,16 +1078,16 @@ namespace SX1262 {
 		}
 	}
 
-	error Transceiver::waitForBusyPin(const uint32_t timeoutMs) const {
+	SX1262Error SX1262::waitForBusyPin(const uint32_t timeoutMs) const {
 		if (!getBusyPinLevel() || xSemaphoreTake(_busyPinSemaphore, pdMS_TO_TICKS(timeoutMs)) == pdTRUE)
-			return error::none;
+			return SX1262Error::none;
 
 		ESP_LOGE(_logTag, "failed to wait for busy pin: timeout reached");
 
-		return error::timeout;
+		return SX1262Error::timeout;
 	}
 
-	bool Transceiver::SPITransmit(spi_transaction_t* t) const {
+	bool SX1262::SPITransmit(spi_transaction_t* t) const {
 		if (_SPIMutex)
 			xSemaphoreTake(_SPIMutex, portMAX_DELAY);
 
@@ -1096,9 +1099,9 @@ namespace SX1262 {
 		return state;
 	}
 
-	error Transceiver::SPIReadCommand(const uint8_t command, std::span<uint8_t> data) {
-		if (waitForBusyPin() == error::timeout)
-			return error::timeout;
+	SX1262Error SX1262::SPIReadCommand(const uint8_t command, std::span<uint8_t> data) {
+		if (waitForBusyPin() == SX1262Error::timeout)
+			return SX1262Error::timeout;
 
 		_SPIBuffer[0] = command; // W: command | R: status
 		_SPIBuffer[1] = 0x00;    // W: -       | R: status
@@ -1118,15 +1121,15 @@ namespace SX1262 {
 
 			std::memcpy(data.data(), _SPIBuffer + 2, data.size());
 
-			return error::none;
+			return SX1262Error::none;
 		}
 
-		return error::SPITransaction;
+		return SX1262Error::SPITransaction;
 	}
 
-	error Transceiver::SPIReadRegister(const uint16_t reg, const std::span<uint8_t> data) {
-		if (waitForBusyPin() == error::timeout)
-			return error::timeout;
+	SX1262Error SX1262::SPIReadRegister(const uint16_t reg, const std::span<uint8_t> data) {
+		if (waitForBusyPin() == SX1262Error::timeout)
+			return SX1262Error::timeout;
 
 		_SPIBuffer[0] = CMD_READ_REGISTER; // W: command  | R: status
 		_SPIBuffer[1] = (reg >> 8) & 0xFF; // W: Reg MSB  | R: status
@@ -1147,26 +1150,26 @@ namespace SX1262 {
 			//				for (int i = 0; i < 4 + length; ++i) {
 			//					ESP_LOGI(_logTag, "SPIReadRegister buffer[%d]: %d", i, _SPIBuffer[i]);
 			//				}
-			return error::none;
+			return SX1262Error::none;
 		}
 
-		return error::SPITransaction;
+		return SX1262Error::SPITransaction;
 	}
 
-	error Transceiver::SPIWrite(const uint8_t* data, const uint16_t length) {
+	SX1262Error SX1262::SPIWrite(const uint8_t* data, const uint16_t length) {
 		std::memcpy(_SPIBuffer, data, length);
 
 		return SPIWriteBuffer(length);
 	}
 
-	error Transceiver::SPIWriteCommandAndUint8(const uint8_t command, const uint8_t data) {
+	SX1262Error SX1262::SPIWriteCommandAndUint8(const uint8_t command, const uint8_t data) {
 		_SPIBuffer[0] = command;
 		_SPIBuffer[1] = data;
 
 		return SPIWriteBuffer(2);
 	}
 
-	error Transceiver::SPIWriteRegister(const uint16_t reg, const std::span<const uint8_t> data) {
+	SX1262Error SX1262::SPIWriteRegister(const uint16_t reg, const std::span<const uint8_t> data) {
 		_SPIBuffer[0] = CMD_WRITE_REGISTER;
 		_SPIBuffer[1] = (reg >> 8) & 0xFF;  // Reg MSB
 		_SPIBuffer[2] = reg & 0xFF;         // Reg LSB
@@ -1176,18 +1179,18 @@ namespace SX1262 {
 		return SPIWriteBuffer(3 + data.size());
 	}
 
-	error Transceiver::SPIWriteBuffer(const uint16_t totalLength) const {
-		if (waitForBusyPin() == error::timeout)
-			return error::timeout;
+	SX1262Error SX1262::SPIWriteBuffer(const uint16_t totalLength) const {
+		if (waitForBusyPin() == SX1262Error::timeout)
+			return SX1262Error::timeout;
 
 		spi_transaction_t t {};
 		t.tx_buffer = _SPIBuffer;
 		t.length = 8 * totalLength;
 
-		return SPITransmit(&t) ? error::none : error::SPITransaction;
+		return SPITransmit(&t) ? SX1262Error::none : SX1262Error::SPITransaction;
 	}
 
-	bool Transceiver::checkESPError(const esp_err_t error) {
+	bool SX1262::checkESPError(const esp_err_t error) {
 		if (error != ESP_OK) {
 			ESP_ERROR_CHECK_WITHOUT_ABORT(error);
 			return false;
@@ -1196,27 +1199,27 @@ namespace SX1262 {
 		return true;
 	}
 
-	error Transceiver::checkForLoRaPacketType() {
+	SX1262Error SX1262::checkForLoRaPacketType() {
 		uint8_t packetType = 0;
 
 		const auto error = getPacketType(packetType);
 
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		if (packetType != PACKET_TYPE_LORA) {
 			ESP_LOGE(_logTag, "failed to set coding rate: packet type %d is not LoRa", packetType);
-			return error::invalidPacketType;
+			return SX1262Error::invalidPacketType;
 		}
 
-		return error::none;
+		return SX1262Error::none;
 	}
 
-	void Transceiver::delayMs(const uint32_t ms) {
+	void SX1262::delayMs(const uint32_t ms) {
 		vTaskDelay(pdMS_TO_TICKS(std::max<uint32_t>(ms, portTICK_PERIOD_MS)));
 	}
 
-	error Transceiver::setRXOrTX(const uint8_t command, const uint32_t timeoutUs) {
+	SX1262Error SX1262::setRXOrTX(const uint8_t command, const uint32_t timeoutUs) {
 		// From datasheet: timeoutUs = timeoutValue * 15.625 µs
 		const uint32_t timeout = timeoutUs / 15.625f;
 
@@ -1230,7 +1233,7 @@ namespace SX1262 {
 		return SPIWrite(data, 4);
 	}
 
-	error Transceiver::fixInvertedIQ(const uint8_t iqConfig) {
+	SX1262Error SX1262::fixInvertedIQ(const uint8_t iqConfig) {
 		// fixes IQ configuration for inverted IQ
 		// see SX1262/SX1268 datasheet, chapter 15 Known Limitations, section 15.4 for details
 
@@ -1239,7 +1242,7 @@ namespace SX1262 {
 
 		const auto error = SPIReadRegister(REG_IQ_CONFIG, { &iqConfigCurrent, 1 });
 
-		if (error != error::none)
+		if (error != SX1262Error::none)
 			return error;
 
 		// set correct IQ configuration
@@ -1254,13 +1257,13 @@ namespace SX1262 {
 		return SPIWriteRegister(REG_IQ_CONFIG, { &iqConfigCurrent, 1 });
 	}
 
-	float Transceiver::getRSSIFromPacketStatus(const uint32_t packetStatus) {
+	float SX1262::getRSSIFromPacketStatus(const uint32_t packetStatus) {
 		const uint8_t RSSIValue = packetStatus & 0xFF;
 
 		return RSSIValue / -2.f;
 	}
 
-	float Transceiver::getSNRFromPacketStatus(const uint32_t packetStatus) {
+	float SX1262::getSNRFromPacketStatus(const uint32_t packetStatus) {
 		const uint8_t snrPkt = (packetStatus >> 8) & 0xFF;
 
 		if (snrPkt < 128)
@@ -1269,11 +1272,11 @@ namespace SX1262 {
 		return (snrPkt - 256) / 4.f;
 	}
 
-	error Transceiver::updatePacketParams(const uint8_t length) {
+	SX1262Error SX1262::updatePacketParams() {
 		return setPacketParams(
 			_preambleLength,
 			_headerType,
-			length,
+			_packetLength,
 			_crcType,
 			_invertIQ
 		);
