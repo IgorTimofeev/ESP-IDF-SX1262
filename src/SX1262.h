@@ -197,7 +197,7 @@ namespace YOBA {
 			SX1262Error setPAConfig(const uint8_t paDutyCycle = 0x04, const uint8_t deviceSel = PA_CONFIG_SX1262, const uint8_t hpMax = PA_CONFIG_HP_MAX, const uint8_t paLut = PA_CONFIG_PA_LUT);
 			SX1262Error setTXParams(const int8_t power, const uint8_t rampTime);
 
-			static void errorToString(const SX1262Error error, const std::span<char> str);
+			static const char* errorToString(const SX1262Error error);
 
 			// -------------------------------- Easy-to-use methods --------------------------------
 

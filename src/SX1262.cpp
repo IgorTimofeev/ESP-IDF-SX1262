@@ -1002,43 +1002,43 @@ namespace YOBA {
 		return SPIWrite(data, 3);
 	}
 
-	// const char* SX1262::errorToString(const SX1262Error error) {
-	// 	switch (error) {
-	// 		case SX1262Error::none: return "none";
-	// 		case SX1262Error::invalidChip: return "invalid chip";
-	// 		case SX1262Error::SPITransaction: return "SPI transaction";
-	// 		case SX1262Error::timeout: return "timeout";
-	// 		case SX1262Error::invalidArgument: return "invalid argument";
-	// 		case SX1262Error::invalidPacketType: return "invalid packet type";
-	// 		default: return "invalid checksum";
-	// 	}
-	// }
-
-	void SX1262::errorToString(const SX1262Error error, const std::span<char> str) {
+	const char* SX1262::errorToString(const SX1262Error error) {
 		switch (error) {
-			case SX1262Error::none:
-				std::strncpy(str.data(), "none", str.size());
-				break;
-			case SX1262Error::invalidChip:
-				std::strncpy(str.data(), "invalid chip", str.size());
-				break;
-			case SX1262Error::SPITransaction:
-				std::strncpy(str.data(), "SPI transaction", str.size());
-				break;
-			case SX1262Error::timeout:
-				std::strncpy(str.data(), "timeout", str.size());
-				break;
-			case SX1262Error::invalidArgument:
-				std::strncpy(str.data(), "invalid argument", str.size());
-				break;
-			case SX1262Error::invalidPacketType:
-				std::strncpy(str.data(), "invalid packet type", str.size());
-				break;
-			case SX1262Error::invalidChecksum:
-				std::strncpy(str.data(), "invalid checksum", str.size());
-				break;
+			case SX1262Error::none: return "none";
+			case SX1262Error::invalidChip: return "invalid chip";
+			case SX1262Error::SPITransaction: return "SPI transaction";
+			case SX1262Error::timeout: return "timeout";
+			case SX1262Error::invalidArgument: return "invalid argument";
+			case SX1262Error::invalidPacketType: return "invalid packet type";
+			default: return "invalid checksum";
 		}
 	}
+
+	// void SX1262::errorToString(const SX1262Error error, const std::span<char> str) {
+	// 	switch (error) {
+	// 		case SX1262Error::none:
+	// 			std::strncpy(str.data(), "none", str.size());
+	// 			break;
+	// 		case SX1262Error::invalidChip:
+	// 			std::strncpy(str.data(), "invalid chip", str.size());
+	// 			break;
+	// 		case SX1262Error::SPITransaction:
+	// 			std::strncpy(str.data(), "SPI transaction", str.size());
+	// 			break;
+	// 		case SX1262Error::timeout:
+	// 			std::strncpy(str.data(), "timeout", str.size());
+	// 			break;
+	// 		case SX1262Error::invalidArgument:
+	// 			std::strncpy(str.data(), "invalid argument", str.size());
+	// 			break;
+	// 		case SX1262Error::invalidPacketType:
+	// 			std::strncpy(str.data(), "invalid packet type", str.size());
+	// 			break;
+	// 		case SX1262Error::invalidChecksum:
+	// 			std::strncpy(str.data(), "invalid checksum", str.size());
+	// 			break;
+	// 	}
+	// }
 
 	void SX1262::setSSPinLevel(const bool value) const {
 		gpio_set_level(_SSPin, value);
