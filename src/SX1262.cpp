@@ -484,7 +484,7 @@ namespace YOBA {
 		return SPIWriteCommandAndUint8(CMD_SET_DIO2_AS_RF_SWITCH_CTRL, enable ? DIO2_AS_RF_SWITCH : DIO2_AS_IRQ);
 	}
 
-	SX1262Error SX1262::setLoRaModulationParams(const uint8_t spreadingFactor, const SX1262LoRaBandwidth bandwidth, const SX1262LoRaCodingRate codingRate, const uint8_t ldrOptimize) {
+	SX1262Error SX1262::setLoRaModulationParams(const uint8_t spreadingFactor, const SX1262LoRaBandwidth bandwidth, const SX1262LoRaCodingRate codingRate, const uint8_t LDROptimize) {
 		if (spreadingFactor < 5 || spreadingFactor > 12) {
 			ESP_LOGE(_logTag, "failed to set modulation params: spreading factor %d is out of range [5; 12]", spreadingFactor);
 			return SX1262Error::invalidArgument;
@@ -528,7 +528,7 @@ namespace YOBA {
 			_LoRaSpreadingFactor,
 			bwRegVal,
 			crRegVal,
-			ldrOptimize
+			LDROptimize
 		};
 
 		return SPIWrite(data, 5);
@@ -1016,15 +1016,41 @@ namespace YOBA {
 		return SPIWrite(data, 3);
 	}
 
-	const char* SX1262::errorToString(const SX1262Error error) {
+	// const char* SX1262::errorToString(const SX1262Error error) {
+	// 	switch (error) {
+	// 		case SX1262Error::none: return "none";
+	// 		case SX1262Error::invalidChip: return "invalid chip";
+	// 		case SX1262Error::SPITransaction: return "SPI transaction";
+	// 		case SX1262Error::timeout: return "timeout";
+	// 		case SX1262Error::invalidArgument: return "invalid argument";
+	// 		case SX1262Error::invalidPacketType: return "invalid packet type";
+	// 		default: return "invalid checksum";
+	// 	}
+	// }
+
+	void SX1262::errorToString(const SX1262Error error, const std::span<char> str) {
 		switch (error) {
-			case SX1262Error::none: return "none";
-			case SX1262Error::invalidChip: return "invalid chip";
-			case SX1262Error::SPITransaction: return "SPI transaction";
-			case SX1262Error::timeout: return "timeout";
-			case SX1262Error::invalidArgument: return "invalid argument";
-			case SX1262Error::invalidPacketType: return "invalid packet type";
-			default: return "invalid checksum";
+			case SX1262Error::none:
+				std::strncpy(str.data(), "none", str.size());
+				break;
+			case SX1262Error::invalidChip:
+				std::strncpy(str.data(), "invalid chip", str.size());
+				break;
+			case SX1262Error::SPITransaction:
+				std::strncpy(str.data(), "SPI transaction", str.size());
+				break;
+			case SX1262Error::timeout:
+				std::strncpy(str.data(), "timeout", str.size());
+				break;
+			case SX1262Error::invalidArgument:
+				std::strncpy(str.data(), "invalid argument", str.size());
+				break;
+			case SX1262Error::invalidPacketType:
+				std::strncpy(str.data(), "invalid packet type", str.size());
+				break;
+			case SX1262Error::invalidChecksum:
+				std::strncpy(str.data(), "invalid checksum", str.size());
+				break;
 		}
 	}
 

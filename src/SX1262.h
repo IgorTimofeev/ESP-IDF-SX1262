@@ -138,7 +138,7 @@ namespace YOBA {
 				const uint8_t spreadingFactor,
 				const SX1262LoRaBandwidth bandwidth,
 				const SX1262LoRaCodingRate codingRate,
-				const uint8_t ldrOptimize = false
+				const uint8_t LDROptimize = false
 			);
 
 			SX1262Error setTXClampConfig(const bool enable);
@@ -159,8 +159,6 @@ namespace YOBA {
 			SX1262Error getRSSIInst(float& rssi);
 			SX1262Error getSNR(float& snr);
 
-			// -------------------------------- Extensions --------------------------------
-
 			/*!
 			  \brief Sets preamble length for LoRa or FSK modem. Allowed values range from 1 to 65535.
 			  \param preambleLength Preamble length to be set in symbols (LoRa) or bits (FSK).
@@ -180,29 +178,31 @@ namespace YOBA {
 		   */
 			SX1262Error invertLoRaIQ(const bool enable);
 			SX1262Error waitForDIO1Semaphore(const uint32_t timeoutUs) const;
-			SX1262Error transmit(const std::span<const uint8_t> data, uint32_t timeoutUs = 0);
 			SX1262Error fixImplicitTimeout();
 			SX1262Error getReceivedPacketLength(uint8_t& length, uint8_t& offset);
-			SX1262Error finishReceive();
-			SX1262Error receive(uint8_t* buffer, uint8_t& receivedLength, uint32_t timeoutUs = 0);
 			SX1262Error fixLoRaTXModulationBeforeTransmission();
 			SX1262Error setPacketLength(const uint8_t packetLength);
 
 			/*!
- \brief Set the PA (power amplifier) configuration. Allows user to optimize PA for a specific output power
- and matching network. Any calls to this method must be done after calling begin/beginFSK and/or setOutputPower.
- WARNING: Use at your own risk! Setting invalid values can and will lead to permanent damage!
- \param paDutyCycle PA duty cycle raw value.
- \param deviceSel Device select, usually PA_CONFIG_SX1261,
- PA_CONFIG_SX1262 or PA_CONFIG_SX1268.
- \param hpMax hpMax raw value.
- \param paLut paLut PA lookup table raw value.
- \returns \ref status_codes
-*/
+			 \brief Set the PA (power amplifier) configuration. Allows user to optimize PA for a specific output power
+			 and matching network. Any calls to this method must be done after calling begin/beginFSK and/or setOutputPower.
+			 WARNING: Use at your own risk! Setting invalid values can and will lead to permanent damage!
+			 \param paDutyCycle PA duty cycle raw value.
+			 \param deviceSel Device select, usually PA_CONFIG_SX1262,
+			 PA_CONFIG_SX1262 or PA_CONFIG_SX1268.
+			 \param hpMax hpMax raw value.
+			 \param paLut paLut PA lookup table raw value.
+			 \returns \ref status_codes
+			*/
 			SX1262Error setPAConfig(const uint8_t paDutyCycle = 0x04, const uint8_t deviceSel = PA_CONFIG_SX1262, const uint8_t hpMax = PA_CONFIG_HP_MAX, const uint8_t paLut = PA_CONFIG_PA_LUT);
 			SX1262Error setTXParams(const int8_t power, const uint8_t rampTime);
 
-			static const char* errorToString(const SX1262Error error);
+			static void errorToString(const SX1262Error error, const std::span<char> str);
+
+			// -------------------------------- Easy-to-use methods --------------------------------
+
+			SX1262Error receive(uint8_t* buffer, uint8_t& receivedLength, uint32_t timeoutUs = 0);
+			SX1262Error transmit(const std::span<const uint8_t> data, uint32_t timeoutUs = 0);
 
 		private:
 			constexpr static auto _logTag = "SX1262";
@@ -267,6 +267,9 @@ namespace YOBA {
 			static float getRSSIFromPacketStatus(const uint32_t packetStatus);
 			static float getSNRFromPacketStatus(const uint32_t packetStatus);
 			SX1262Error updatePacketParams();
+
+			SX1262Error finishReceive();
+
 
 		public:
 			
