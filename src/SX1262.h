@@ -51,6 +51,11 @@ namespace YOBA {
 		bw500_0, // 500.0 kHz
 	};
 
+	enum class SX1262LoRaHeaderType : uint8_t {
+		explicitHeader,
+		implicitHeader
+	};
+
 	class SX1262 {
 		public:
 			SX1262Error setup(
@@ -144,14 +149,6 @@ namespace YOBA {
 			SX1262Error setTXClampConfig(const bool enable);
 			SX1262Error setOutputPower(int8_t powerDBm);
 
-			SX1262Error setPacketParams(
-				const uint16_t preambleLength,
-				const uint8_t headerType,
-				const uint8_t length,
-				const uint8_t crcType,
-				const uint8_t invertIQ
-			);
-
 			SX1262Error writeBuffer(const std::span<const uint8_t> data, const uint8_t offset = 0x00);
 			SX1262Error readBuffer(const std::span<uint8_t> data, const uint8_t offset);
 			SX1262Error getPacketStatus(uint32_t& status);
@@ -178,10 +175,11 @@ namespace YOBA {
 		   */
 			SX1262Error invertLoRaIQ(const bool enable);
 			SX1262Error waitForDIO1Semaphore(const uint32_t timeoutUs) const;
-			SX1262Error fixImplicitTimeout();
+			SX1262Error fixImplicitPacketLengthTimeout();
 			SX1262Error getReceivedPacketLength(uint8_t& length, uint8_t& offset);
 			SX1262Error fixLoRaTXModulationBeforeTransmission();
-			SX1262Error setPacketLength(const uint8_t packetLength);
+			SX1262Error setLoRaHeaderType(const SX1262LoRaHeaderType headerType);
+			SX1262Error setLoRaImplicitPacketLength(const uint8_t packetLength);
 
 			/*!
 			 \brief Set the PA (power amplifier) configuration. Allows user to optimize PA for a specific output power
@@ -205,18 +203,12 @@ namespace YOBA {
 			SX1262Error transmit(const std::span<const uint8_t> data, uint32_t timeoutUs = 0);
 
 		private:
+			// -------------------------------- Generic --------------------------------
+
 			constexpr static auto _logTag = "SX1262";
 
 			uint32_t _frequencyHz = 0;
-			uint8_t _LoRaSpreadingFactor = 7;
-			SX1262LoRaCodingRate _LoRaCodingRate = SX1262LoRaCodingRate::cr4_5;
-			SX1262LoRaBandwidth _LoRaBandwidth = SX1262LoRaBandwidth::bw500_0;
-			uint16_t _preambleLength = 0;
-			uint8_t _crcType = LORA_CRC_ON;
-			uint8_t _headerType = LORA_HEADER_EXPLICIT;
 			uint8_t _packetType = PACKET_TYPE_LORA;
-			uint8_t _invertIQ = LORA_IQ_STANDARD;
-			uint8_t _packetLength = 255;
 
 			// -------------------------------- GPIO --------------------------------
 
@@ -230,6 +222,17 @@ namespace YOBA {
 			bool getBusyPinLevel() const;
 			bool getDIO1PinLevel() const;
 
+			// -------------------------------- LoRa --------------------------------
+
+			SX1262LoRaHeaderType _LoRaHeaderType = SX1262LoRaHeaderType::explicitHeader;
+			uint16_t _LoRaPreambleLength = 0;
+			uint8_t _LoRaCRCType = LORA_CRC_ON;
+			uint8_t _LoRaIQ = LORA_IQ_STANDARD;
+			uint8_t _LoRaSpreadingFactor = 7;
+			SX1262LoRaCodingRate _LoRaCodingRate = SX1262LoRaCodingRate::cr4_5;
+			SX1262LoRaBandwidth _LoRaBandwidth = SX1262LoRaBandwidth::bw500_0;
+			uint8_t _LoRaExplicitPacketLength = 255;
+			uint8_t _LoRaImplicitPacketLength = 255;
 
 			// -------------------------------- Interrupts --------------------------------
 

@@ -573,25 +573,6 @@ namespace YOBA {
 		return SPIWriteRegister(REG_OCP_CONFIGURATION, { &ocp, 1 });
 	}
 
-	SX1262Error SX1262::setPacketParams(const uint16_t preambleLength, const uint8_t headerType, const uint8_t length, const uint8_t crcType, const uint8_t invertIQ) {
-		const auto error = fixInvertedIQ(invertIQ);
-
-		if (error != SX1262Error::none)
-			return error;
-
-		const uint8_t data[7] {
-			CMD_SET_PACKET_PARAMS,
-			static_cast<uint8_t>((preambleLength >> 8) & 0xFF),
-			static_cast<uint8_t>(preambleLength & 0xFF),
-			headerType,
-			length,
-			crcType,
-			invertIQ
-		};
-
-		return SPIWrite(data, 7);
-	}
-
 	SX1262Error SX1262::writeBuffer(const std::span<const uint8_t> data, const uint8_t offset) {
 		_SPIBuffer[0] = CMD_WRITE_BUFFER;
 		_SPIBuffer[1] = offset;
@@ -683,23 +664,23 @@ namespace YOBA {
 	}
 
 	SX1262Error SX1262::setLoRaPreambleLength(const uint16_t preambleLength) {
-		_preambleLength = preambleLength;
+		_LoRaPreambleLength = preambleLength;
 
 		return updatePacketParams();
 	}
 
 	SX1262Error SX1262::setLoRaCRC(const bool enabled) {
-		_crcType = enabled ? LORA_CRC_ON : LORA_CRC_OFF;
+		_LoRaCRCType = enabled ? LORA_CRC_ON : LORA_CRC_OFF;
 
 		return updatePacketParams();
 	}
 
 	SX1262Error SX1262::invertLoRaIQ(const bool enable) {
 		if (enable) {
-			_invertIQ = LORA_IQ_INVERTED;
+			_LoRaIQ = LORA_IQ_INVERTED;
 		}
 		else {
-			_invertIQ = LORA_IQ_STANDARD;
+			_LoRaIQ = LORA_IQ_STANDARD;
 		}
 
 		return updatePacketParams();
@@ -735,13 +716,15 @@ namespace YOBA {
 			}
 
 			// Long interleaver supports up to 253 bytes if CRC is enabled
-			if (_crcType == LORA_CRC_ON && data.size() > MAX_PACKET_LENGTH - 2) {
+			if (_LoRaCRCType == LORA_CRC_ON && data.size() > MAX_PACKET_LENGTH - 2) {
 				ESP_LOGE(_logTag, "failed to transmit: packet is too long for long interleaver coding rate");
 				return SX1262Error::invalidArgument;
 			}
 		}
 
-		auto error = setPacketLength(data.size());
+		_LoRaExplicitPacketLength = data.size();
+		auto error = updatePacketParams();
+
 		if (error != SX1262Error::none)
 			return error;
 
@@ -799,12 +782,12 @@ namespace YOBA {
 		return SX1262Error::none;
 	}
 
-	SX1262Error SX1262::fixImplicitTimeout() {
+	SX1262Error SX1262::fixImplicitPacketLengthTimeout() {
 		// fixes timeout in implicit header mode
 		// see SX1262/SX1268 datasheet, chapter 15 Known Limitations, section 15.3 for details
 
 		// check if we're in implicit LoRa mode
-		if (_headerType != LORA_HEADER_IMPLICIT || _packetType != PACKET_TYPE_LORA) {
+		if (_LoRaHeaderType != SX1262LoRaHeaderType::implicitHeader || _packetType != PACKET_TYPE_LORA) {
 			// not in the correct mode, nothing to do here
 			return SX1262Error::none;
 		}
@@ -835,8 +818,8 @@ namespace YOBA {
 
 	SX1262Error SX1262::getReceivedPacketLength(uint8_t& length, uint8_t& offset) {
 		// in implicit mode, return the cached value if the offset was not requested
-		if ((_packetType == PACKET_TYPE_LORA) && (_headerType == LORA_HEADER_IMPLICIT) && (!offset)) {
-			length = _packetLength;
+		if ((_packetType == PACKET_TYPE_LORA) && (_LoRaHeaderType == SX1262LoRaHeaderType::implicitHeader) && (!offset)) {
+			length = _LoRaImplicitPacketLength;
 			offset = 0;
 
 			return SX1262Error::none;
@@ -861,7 +844,7 @@ namespace YOBA {
 	SX1262Error SX1262::finishReceive() {
 		// try to fix timeout error in implicit header mode
 		// check for modem type and header mode is done in fixImplicitTimeout()
-		const auto error = fixImplicitTimeout();
+		const auto error = fixImplicitPacketLengthTimeout();
 		if (error != SX1262Error::none)
 			return error;
 
@@ -889,7 +872,7 @@ namespace YOBA {
 		if (error != SX1262Error::none)
 			return error;
 
-		error = setPacketLength(255);
+		error = setLoRaImplicitPacketLength(255);
 		if (error != SX1262Error::none)
 			return error;
 
@@ -969,8 +952,14 @@ namespace YOBA {
 		return SPIWriteRegister(REG_TX_MODULATION, { &txModulation, 1 });
 	}
 
-	SX1262Error SX1262::setPacketLength(const uint8_t packetLength) {
-		_packetLength = packetLength;
+	SX1262Error SX1262::setLoRaHeaderType(const SX1262LoRaHeaderType headerType) {
+		_LoRaHeaderType = headerType;
+
+		return updatePacketParams();
+	}
+
+	SX1262Error SX1262::setLoRaImplicitPacketLength(const uint8_t packetLength) {
+		_LoRaImplicitPacketLength = packetLength;
 
 		return updatePacketParams();
 	}
@@ -1269,12 +1258,21 @@ namespace YOBA {
 	}
 
 	SX1262Error SX1262::updatePacketParams() {
-		return setPacketParams(
-			_preambleLength,
-			_headerType,
-			_packetLength,
-			_crcType,
-			_invertIQ
-		);
+		const auto error = fixInvertedIQ(_LoRaIQ);
+
+		if (error != SX1262Error::none)
+			return error;
+
+		const uint8_t data[7] {
+			CMD_SET_PACKET_PARAMS,
+			static_cast<uint8_t>((_LoRaPreambleLength >> 8) & 0xFF),
+			static_cast<uint8_t>(_LoRaPreambleLength & 0xFF),
+			_LoRaHeaderType == SX1262LoRaHeaderType::implicitHeader ? LORA_HEADER_IMPLICIT : LORA_HEADER_EXPLICIT,
+			_LoRaHeaderType == SX1262LoRaHeaderType::implicitHeader ? _LoRaImplicitPacketLength : _LoRaExplicitPacketLength,
+			_LoRaCRCType,
+			_LoRaIQ
+		};
+
+		return SPIWrite(data, 7);
 	}
 }
