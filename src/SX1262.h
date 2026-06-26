@@ -65,6 +65,16 @@ namespace YOBA {
 				const gpio_num_t RSTPin,
 
 				const spi_host_device_t SPIHostDevice,
+				const uint32_t SPIFrequencyHz
+			);
+
+			SX1262Error setup(
+				const gpio_num_t SSPin,
+				const gpio_num_t busyPin,
+				const gpio_num_t DIO1Pin,
+				const gpio_num_t RSTPin,
+
+				const spi_host_device_t SPIHostDevice,
 				const uint32_t SPIFrequencyHz,
 
 				const uint32_t frequencyHz,
@@ -137,7 +147,7 @@ namespace YOBA {
 			  \brief Set DIO2 to function as RF switch (default in Semtech example designs).
 			  \returns \ref status_codes
 			*/
-			SX1262Error setDio2AsRfSwitch(const bool enable);
+			SX1262Error setDIO2AsRFSwitch(const bool enable);
 
 			SX1262Error setLoRaModulationParams(
 				const uint8_t spreadingFactor,

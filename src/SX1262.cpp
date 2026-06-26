@@ -14,6 +14,7 @@
 #include <esp_log.h>
 
 namespace YOBA {
+	// Dark souls setup
 	SX1262Error SX1262::setup(
 		const gpio_num_t SSPin,
 		const gpio_num_t busyPin,
@@ -21,18 +22,7 @@ namespace YOBA {
 		const gpio_num_t RSTPin,
 
 		const spi_host_device_t SPIHostDevice,
-		const uint32_t SPIFrequencyHz,
-
-		const uint32_t frequencyHz,
-		const SX1262LoRaBandwidth bandwidth,
-		const uint8_t spreadingFactor,
-		const SX1262LoRaCodingRate codingRate,
-		const uint8_t syncWord,
-		const uint16_t preambleLength,
-
-		const uint8_t currentLimitMA,
-		const int8_t powerDBm,
-		const bool useLDORegulator
+		const uint32_t SPIFrequencyHz
 	) {
 		_SSPin = SSPin;
 		_busyPin = busyPin;
@@ -105,9 +95,45 @@ namespace YOBA {
 		if (!checkESPError(ESPError))
 			return SX1262Error::SPITransaction;
 
+		return SX1262Error::none;
+	}
+
+	// Mario cart setup
+	SX1262Error SX1262::setup(
+		const gpio_num_t SSPin,
+		const gpio_num_t busyPin,
+		const gpio_num_t DIO1Pin,
+		const gpio_num_t RSTPin,
+
+		const spi_host_device_t SPIHostDevice,
+		const uint32_t SPIFrequencyHz,
+
+		const uint32_t frequencyHz,
+		const SX1262LoRaBandwidth bandwidth,
+		const uint8_t spreadingFactor,
+		const SX1262LoRaCodingRate codingRate,
+		const uint8_t syncWord,
+		const uint16_t preambleLength,
+
+		const uint8_t currentLimitMA,
+		const int8_t powerDBm,
+		const bool useLDORegulator
+	) {
+		auto error = setup(
+			SSPin,
+			busyPin,
+			DIO1Pin,
+			RSTPin,
+			SPIHostDevice,
+			SPIFrequencyHz
+		);
+
+		if (error != SX1262Error::none)
+			return error;
+
 		// -------------------------------- Initialization sequence --------------------------------
 
-		auto error = reset();
+		error = reset();
 		if (error != SX1262Error::none)
 			return error;
 
@@ -157,7 +183,7 @@ namespace YOBA {
 		if (error != SX1262Error::none)
 			return error;
 
-		error = setDio2AsRfSwitch(true);
+		error = setDIO2AsRFSwitch(true);
 		if (error != SX1262Error::none)
 			return error;
 
@@ -466,7 +492,7 @@ namespace YOBA {
 		return SPIWriteRegister(REG_OCP_CONFIGURATION, { &rawLimit, 1 });
 	}
 
-	SX1262Error SX1262::setDio2AsRfSwitch(const bool enable) {
+	SX1262Error SX1262::setDIO2AsRFSwitch(const bool enable) {
 		return SPIWriteCommandAndUint8(CMD_SET_DIO2_AS_RF_SWITCH_CTRL, enable ? DIO2_AS_RF_SWITCH : DIO2_AS_IRQ);
 	}
 
