@@ -1,4 +1,4 @@
-#include "SX1262.h"
+#include "SX1262.hpp"
 
 #include <cmath>
 #include <cstring>
